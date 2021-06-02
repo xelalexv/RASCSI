@@ -4,7 +4,7 @@
 #
 #################################################################################
 
-RASCSI_VERSION = 1.16
+RASCSI_VERSION = 1.25
 RASCSI_SOURCE = rascsi-$(RASCSI_VERSION).tar.gz
 RASCSI_SITE = file:///home/akuker
 RASCSI_LICENSE = BSD-3-Clause
@@ -20,9 +20,9 @@ define RASCSI_BUILD_CMDS
 endef
 
 define RASCSI_INSTALL_STAGING_CMDS
-	$(INSTALL) -D -m 0755 $(@D)/rascsi  $(STAGING_DIR)/usr/bin
-	$(INSTALL) -D -m 0644 $(@D)/rasctl  $(STAGING_DIR)/usr/bin
-	$(INSTALL) -D -m 0755 $(@D)/scsimon $(STAGING_DIR)/usr/bin
+	$(INSTALL) -D -m 0755 $(@D)/bin/fullspec/rascsi  $(STAGING_DIR)/usr/bin
+	$(INSTALL) -D -m 0755 $(@D)/bin/fullspec/rasctl  $(STAGING_DIR)/usr/bin
+	$(INSTALL) -D -m 0755 $(@D)/bin/fullspec/scsimon $(STAGING_DIR)/usr/bin
 endef
 
 define RASCSI_INSTALL_TARGET_CMDS

@@ -5,6 +5,8 @@ config BR2_PACKAGE_RASCSI
 	select BR2_INSTALL_LIBSTDCPP
 	select BR2_TOOLCHAIN_HAS_THREADS
 	select BR2_TOOLCHAIN_BUILDROOT_LOCALE
+	select BR2_PACKAGE_FMT
+	select BR2_PACKAGE_LIBPCAP
 	help
 	  This package builds the RaSCSI service and includes
 	  it in the generated file system image.
