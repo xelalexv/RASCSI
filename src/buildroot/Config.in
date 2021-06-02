@@ -1,0 +1,5 @@
+menu "RaSCSI Target packages"
+
+	source "$BR2_EXTERNAL_RASCSI_TREE_PATH/package/rascsi/Config.in"
+
+endmenu
