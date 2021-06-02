@@ -4,7 +4,7 @@
 #
 #################################################################################
 
-RASCSI_VERSION = 1.12
+RASCSI_VERSION = 1.16
 RASCSI_SOURCE = rascsi-$(RASCSI_VERSION).tar.gz
 RASCSI_SITE = file:///home/akuker
 RASCSI_LICENSE = BSD-3-Clause
