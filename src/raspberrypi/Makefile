@@ -15,6 +15,9 @@ CROSS_COMPILE ?= arm-linux-gnueabihf-
 CC  = $(CROSS_COMPILE)gcc
 CXX = $(CROSS_COMPILE)g++
 
+mkfile_path := $(abspath $(lastword $(MAKEFILE_LIST)))
+mkfile_dir := $(dir $(mkfile_path))
+
 ##   DEBUG=1  : A Debug build includes the debugger symbols
 ##              and disables compiler optimization. Typically,
 ##              this is only used by developers.
@@ -137,7 +140,7 @@ $(OBJDIR) $(BINDIR):
 	mkdir -p $@
 
 $(OBJDIR)/%.o: %.cpp | $(OBJDIR)
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+	$(CXX) $(CXXFLAGS) -c $< -o $@ -I$(mkfile_dir) -DSPDLOG_FMT_EXTERNAL  -DCONNECT_TYPE_$(CONNECT_TYPE)
 
 ## Build Targets:
 ##   all      : Rebuild all of the executable files and re-generate 
@@ -152,10 +155,10 @@ bin-all: $(BIN_ALL)
 docs: $(DOC_DIR)/rascsi_man_page.txt $(DOC_DIR)/rasctl_man_page.txt $(DOC_DIR)/scsimon_man_page.txt
 
 $(BINDIR)/$(RASCSI): $(OBJ_RASCSI) | $(BINDIR)
-	$(CXX) $(CXXFLAGS) -o $@ $(OBJ_RASCSI) -lpthread -lz -lpcap
+	$(CXX) $(CXXFLAGS) -o $@ $(OBJ_RASCSI) -lpthread -lz -lpcap -lfmt
 
 $(BINDIR)/$(RASCTL): $(OBJ_RASCTL) | $(BINDIR)
-	$(CXX) $(CXXFLAGS) -o $@ $(OBJ_RASCTL)
+	$(CXX) $(CXXFLAGS) -o $@ $(OBJ_RASCTL) -lfmt
 
 $(BINDIR)/$(RASDUMP): $(OBJ_RASDUMP) | $(BINDIR)
 	$(CXX) $(CXXFLAGS) -o $@ $(OBJ_RASDUMP)
@@ -164,7 +167,7 @@ $(BINDIR)/$(SASIDUMP): $(OBJ_SASIDUMP) | $(BINDIR)
 	$(CXX) $(CXXFLAGS) -o $@ $(OBJ_SASIDUMP)
 
 $(BINDIR)/$(SCSIMON): $(OBJ_SCSIMON) | $(BINDIR)
-	$(CXX) $(CXXFLAGS) -o $@ $(OBJ_SCSIMON) -lpthread
+	$(CXX) $(CXXFLAGS) -o $@ $(OBJ_SCSIMON) -lpthread -lfmt
 
 ##   clean    : Remove all of the object files, intermediate 
 ##              compiler files and executable files 
