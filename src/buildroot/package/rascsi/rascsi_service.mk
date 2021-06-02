@@ -4,15 +4,15 @@
 #
 #################################################################################
 
-RASCSI_VERSION = 1.0
-RASCSI_SOURCE = rascsi-$(LIBFOO_VERSION).tar.gz
-RASCSI_SITE = http://www.foosoftware.org/download
+RASCSI_VERSION = 1.1
+RASCSI_SOURCE = rascsi-$(RASCSI_VERSION).tar.gz
+RASCSI_SITE = file://~
 RASCSI_LICENSE = BSD-3-Clause
 RASCSI_LICENSE_FILES = LICENSE
 RASCSI_INSTALL_STAGING = YES
 #RASCSI_CONFIG_SCRIPTS = libfoo-config
-RASCSI_DEPENDENCIES += libspdlog
-RASCSI_DEPENDENCIES += ZLIB
+RASCSI_DEPENDENCIES += spdlog
+RASCSI_DEPENDENCIES += libzlib
 
 define RASCSI_BUILD_CMDS
 	$(MAKE) $(TARGET_CONFIGURE_OPTS) -C $(@D) all
