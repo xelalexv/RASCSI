@@ -144,9 +144,10 @@ $(OBJDIR)/%.o: %.cpp | $(OBJDIR)
 ##              the text versions of the manpages
 ##   docs     : Re-generate the text versions of the man pages
 .DEFAULT_GOAL := all
-.PHONY: all ALL docs
+.PHONY: all ALL docs bin-all
 all: $(BIN_ALL) docs
 ALL: all
+bin-all: $(BIN_ALL)
 
 docs: $(DOC_DIR)/rascsi_man_page.txt $(DOC_DIR)/rasctl_man_page.txt $(DOC_DIR)/scsimon_man_page.txt
 
