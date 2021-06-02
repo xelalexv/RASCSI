@@ -4,18 +4,19 @@
 #
 #################################################################################
 
-RASCSI_VERSION = 1.1
+RASCSI_VERSION = 1.12
 RASCSI_SOURCE = rascsi-$(RASCSI_VERSION).tar.gz
-RASCSI_SITE = file://~
+RASCSI_SITE = file:///home/akuker
 RASCSI_LICENSE = BSD-3-Clause
 RASCSI_LICENSE_FILES = LICENSE
 RASCSI_INSTALL_STAGING = YES
 #RASCSI_CONFIG_SCRIPTS = libfoo-config
 RASCSI_DEPENDENCIES += spdlog
 RASCSI_DEPENDENCIES += libzlib
+RASCSI_CFLAGS = -Dasdf
 
 define RASCSI_BUILD_CMDS
-	$(MAKE) $(TARGET_CONFIGURE_OPTS) -C $(@D) all
+	$(MAKE) $(TARGET_CONFIGURE_OPTS) -C $(@D) bin-all
 endef
 
 define RASCSI_INSTALL_STAGING_CMDS

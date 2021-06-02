@@ -3,17 +3,13 @@ config BR2_PACKAGE_RASCSI
 	select BR2_PACKAGE_SPDLOG
 	select BR2_PACKAGE_ZLIB
 	select BR2_INSTALL_LIBSTDCPP
+	select BR2_TOOLCHAIN_HAS_THREADS
 	help
 	  This package builds the RaSCSI service and includes
 	  it in the generated file system image.
 	
 	  http://www.rascsi.com
 
-config BR_PACKAGE_RASCSI_OLED
-	bool "rascsi_oled"
-	select BR2_PACKAGE_PYTHON3
-	help
-	  This includes the python script that will update the
-	  optional attached OLED display
+comment "rascsi needs a glibc toolchain w/ C++"
 
-	  http://www.rascsi.com
+
