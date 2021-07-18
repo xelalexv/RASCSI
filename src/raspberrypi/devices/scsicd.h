@@ -135,6 +135,9 @@ public:
 	void FASTCALL LBAtoMSF(DWORD lba, BYTE *msf) const;			// LBA→MSF conversion
 	DWORD FASTCALL MSFtoLBA(const BYTE *msf) const;				// MSF→LBA conversion
 
+	// Vendor-specific functions
+	int FASTCALL AddVendor(int page, BOOL change, BYTE *buf);		// Add vendor special page
+
 private:
 	// Open
 	BOOL FASTCALL OpenCue(const Filepath& path);				// Open(CUE)

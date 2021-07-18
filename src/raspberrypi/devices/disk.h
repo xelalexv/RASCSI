@@ -268,6 +268,12 @@ protected:
 	BOOL FASTCALL CheckReady();						// Check if ready
 
 	// Internal data
+
+	char m_vendor_id[9];    // 8 characters + null
+	char m_product_id[17];  // 16 characters + null
+	char m_revision_lvl[5]; // 4 characters + null
+	char m_serial_num[9];   // 8 characters + null
+
 	disk_t disk;								// Internal disk data
 	Filepath diskpath;							// File path (for GetPath)
 	BOOL cache_wb;								// Cache mode

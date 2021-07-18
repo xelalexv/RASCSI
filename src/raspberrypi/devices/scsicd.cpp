@@ -630,6 +630,10 @@ int FASTCALL SCSICD::Inquiry(
 		return FALSE;
 	}
 
+	// Clear out any garbage in the buffer
+	memset(buf, 0, 8);
+	scsi_resp_inquiry_t *response = (scsi_resp_inquiry_t*)buf;
+
 	// Basic data
 	// buf[0] ... CD-ROM Device
 	// buf[1] ... Removable
@@ -639,29 +643,42 @@ int FASTCALL SCSICD::Inquiry(
 	memset(buf, 0, 8);
 	buf[0] = 0x05;
 
+	response->device_type = e_scsi_type_cd_dvd;
+	response->removable = scsi_inquiry_removable;
+	response->version = 0x02;
+	response->response_data_format = 0x02;
+	response->flags1 = 0x00;
+	response->flags2 = 0x00;
+	response->flags3 = 0x18;
+
 	// SCSI-2 p.104 4.4.3 Incorrect logical unit handling
 	if (((cdb[1] >> 5) & 0x07) != disk.lun) {
 		buf[0] = 0x7f;
 	}
 
-	buf[1] = 0x80;
-	buf[2] = 0x02;
-	buf[3] = 0x02;
+	memcpy(response->vendor_id,  m_vendor_id,    sizeof(scsi_resp_inquiry_t::vendor_id));
+	memcpy(response->product_id, m_product_id,   sizeof(scsi_resp_inquiry_t::product_id));
+	memcpy(response->revision,   m_revision_lvl, sizeof(scsi_resp_inquiry_t::revision));
+	memcpy(response->serial_num, m_serial_num,   sizeof(scsi_resp_inquiry_t::serial_num));
+
+	// buf[1] = 0x80;
+	// buf[2] = 0x02;
+	// buf[3] = 0x02;
 	buf[4] = 36 - 5;	// Required
 
-	// Fill with blanks
-	memset(&buf[8], 0x20, buf[4] - 3);
+	// // Fill with blanks
+	// memset(&buf[8], 0x20, buf[4] - 3);
 
-	// Vendor name
-	memcpy(&buf[8], BENDER_SIGNATURE, strlen(BENDER_SIGNATURE));
+	// // Vendor name
+	// memcpy(&buf[8], BENDER_SIGNATURE, strlen(BENDER_SIGNATURE));
 
-	// Product name
-	memcpy(&buf[16], "CD-ROM CDU-55S", 14);
+	// // Product name
+	// memcpy(&buf[16], "CD-ROM CDU-55S", 14);
 
-	// Revision (XM6 version number)
-	sprintf(rev, "0%01d%01d%01d",
-				(int)major, (int)(minor >> 4), (int)(minor & 0x0f));
-	memcpy(&buf[32], rev, 4);
+	// // Revision (XM6 version number)
+	// sprintf(rev, "0%01d%01d%01d",
+	// 			(int)major, (int)(minor >> 4), (int)(minor & 0x0f));
+	// memcpy(&buf[32], rev, 4);
 //
 // The following code worked with the modified Apple CD-ROM drivers. Need to
 // test with the original code to see if it works as well....
@@ -689,13 +706,49 @@ int FASTCALL SCSICD::Inquiry(
 	int size = (buf[4] + 5);
 
 	// Limit if the other buffer is small
-	if (size > (int)cdb[4]) {
-		size = (int)cdb[4];
+	if ((cmd->allocation_length > 0) && (size > cmd->allocation_length)){
+		LOGINFO("Reducing size of buffer from %d to %d", (int)size, (int)cmd->allocation_length);
+		size = cmd->allocation_length;
 	}
 
 	//  Success
 	disk.code = DISK_NOERROR;
 	return size;
+}
+
+
+
+//---------------------------------------------------------------------------
+//
+//	Add Vendor special page
+//
+//---------------------------------------------------------------------------
+int FASTCALL SCSICD::AddVendor(int page, BOOL change, BYTE *buf)
+{
+	ASSERT(buf);
+
+	LOGINFO("%s Running special AddVendor for CD-ROM, page %d", __PRETTY_FUNCTION__, page);
+	// Page code 48
+	if ((page != 0x30) && (page != 0x3f)) {
+		LOGWARN("%s received unknown mode sense command %d", __PRETTY_FUNCTION__, page);
+		return 0;
+	}
+    //   #                                                                '0'          A     P    #      L     E    ' '   'C'   'O'   'M'   'P'   'U'   'E'    'R'   ','   ' '   'I'   'N'   'P'   'C'  ' '   ' '   ' '  'C'                    
+	// 0x23, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x30, 0x16, 0x41, 0x50, 0x23, 0x4C, 0x45, 0x20, 0x43, 0x4F, 0x4D, 0x50, 0x55, 0x45, 0x52, 0x2C, 0x20, 0x49, 0x4E, 0x50, 0x43, 0x20, 0x20, 0x20, 0x43
+
+	// Set the message length
+	buf[0] = 0x30;
+	buf[1] = 0x1c;
+
+	// No changeable area
+	if (change) {
+		return 30;
+	}
+
+	// APPLE COMPUTER, INC.
+	memcpy(&buf[0xa], "APPLE COMPUTER, INC.", 20);
+
+	return 30;
 }
 
 //---------------------------------------------------------------------------
