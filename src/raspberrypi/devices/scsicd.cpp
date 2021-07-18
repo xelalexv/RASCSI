@@ -630,6 +630,8 @@ int FASTCALL SCSICD::Inquiry(
 		return FALSE;
 	}
 
+	scsi_cmd_inquiry_t *cmd = (scsi_cmd_inquiry_t*)cdb;
+
 	// Clear out any garbage in the buffer
 	memset(buf, 0, 8);
 	scsi_resp_inquiry_t *response = (scsi_resp_inquiry_t*)buf;
