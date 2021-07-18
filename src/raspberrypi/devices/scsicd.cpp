@@ -618,7 +618,6 @@ BOOL FASTCALL SCSICD::OpenPhysical(const Filepath& path)
 int FASTCALL SCSICD::Inquiry(
 	const DWORD *cdb, BYTE *buf, DWORD major, DWORD minor)
 {
-	char rev[32];
 
 	ASSERT(cdb);
 	ASSERT(buf);
