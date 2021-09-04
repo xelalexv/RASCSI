@@ -21,21 +21,10 @@
 #include "xm6.h"
 #include "filepath.h"
 #include "fileio.h"
-#ifdef RASCSI
 #include "gpiobus.h"
-#ifndef BAREMETAL
 #include "ctapdriver.h"
-#endif	// BAREMETAL
 #include "cfilesystem.h"
 #include "disk.h"
-#else
-#include "vm.h"
-#include "disk.h"
-#include "windrv.h"
-#include "ctapdriver.h"
-#include "mfc_com.h"
-#include "mfc_host.h"
-#endif	// RASCSI
 
 //===========================================================================
 //
@@ -94,8 +83,7 @@ DiskTrack::~DiskTrack()
 //	Initialization
 //
 //---------------------------------------------------------------------------
-void FASTCALL DiskTrack::Init(
-	int track, int size, int sectors, BOOL raw, off64_t imgoff)
+void DiskTrack::Init(int track, int size, int sectors, BOOL raw, off_t imgoff)
 {
 	ASSERT(track >= 0);
 	ASSERT((size >= 8) && (size <= 11));
@@ -123,14 +111,10 @@ void FASTCALL DiskTrack::Init(
 //	Load
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL DiskTrack::Load(const Filepath& path)
+BOOL DiskTrack::Load(const Filepath& path)
 {
 	Fileio fio;
-	off64_t offset;
 	int i;
-	int length;
-
-	ASSERT(this);
 
 	// Not needed if already loaded
 	if (dt.init) {
@@ -141,7 +125,7 @@ BOOL FASTCALL DiskTrack::Load(const Filepath& path)
 
 	// Calculate offset (previous tracks are considered to
     // hold 256 sectors)
-	offset = ((off64_t)dt.track << 8);
+	off_t offset = ((off_t)dt.track << 8);
 	if (dt.raw) {
 		ASSERT(dt.size == 11);
 		offset *= 0x930;
@@ -154,18 +138,16 @@ BOOL FASTCALL DiskTrack::Load(const Filepath& path)
 	offset += dt.imgoffset;
 
 	// Calculate length (data size of this track)
-	length = dt.sectors << dt.size;
+	int length = dt.sectors << dt.size;
 
 	// Allocate buffer memory
 	ASSERT((dt.size >= 8) && (dt.size <= 11));
 	ASSERT((dt.sectors > 0) && (dt.sectors <= 0x100));
 
 	if (dt.buffer == NULL) {
-		#if defined(RASCSI) && !defined(BAREMETAL)
-		posix_memalign((void **)&dt.buffer, 512, ((length + 511) / 512) * 512);
-		#else
-		dt.buffer = (BYTE *)malloc(length * sizeof(BYTE));
-		#endif	// RASCSI && !BAREMETAL
+                if (posix_memalign((void **)&dt.buffer, 512, ((length + 511) / 512) * 512)) {
+                        LOGWARN("%s posix_memalign failed", __PRETTY_FUNCTION__);
+                }
 		dt.length = length;
 	}
 
@@ -176,11 +158,9 @@ BOOL FASTCALL DiskTrack::Load(const Filepath& path)
 	// Reallocate if the buffer length is different
 	if (dt.length != (DWORD)length) {
 		free(dt.buffer);
-		#if defined(RASCSI) && !defined(BAREMETAL)
-		posix_memalign((void **)&dt.buffer, 512, ((length + 511) / 512) * 512);
-		#else
-		dt.buffer = (BYTE *)malloc(length * sizeof(BYTE));
-		#endif	// RASCSI && !BAREMETAL
+		if (posix_memalign((void **)&dt.buffer, 512, ((length + 511) / 512) * 512)) {
+                  LOGWARN("%s posix_memalign failed", __PRETTY_FUNCTION__);  
+                }
 		dt.length = length;
 	}
 
@@ -205,11 +185,7 @@ BOOL FASTCALL DiskTrack::Load(const Filepath& path)
 	memset(dt.changemap, 0x00, dt.sectors * sizeof(BOOL));
 
 	// Read from File
-	#if defined(RASCSI) && !defined(BAREMETAL)
 	if (!fio.OpenDIO(path, Fileio::ReadOnly)) {
-	#else
-	if (!fio.Open(path, Fileio::ReadOnly)) {
-	#endif	// RASCSI && !BAREMETAL
 		return FALSE;
 	}
 	if (dt.raw) {
@@ -254,16 +230,11 @@ BOOL FASTCALL DiskTrack::Load(const Filepath& path)
 //	Save
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL DiskTrack::Save(const Filepath& path)
+BOOL DiskTrack::Save(const Filepath& path)
 {
-	off64_t offset;
 	int i;
 	int j;
-	Fileio fio;
-	int length;
 	int total;
-
-	ASSERT(this);
 
 	// Not needed if not initialized
 	if (!dt.init) {
@@ -285,16 +256,17 @@ BOOL FASTCALL DiskTrack::Save(const Filepath& path)
 	ASSERT(!dt.raw);
 
 	// Calculate offset (previous tracks are considered to hold 256
-	offset = ((off64_t)dt.track << 8);
+	off_t offset = ((off_t)dt.track << 8);
 	offset <<= dt.size;
 
 	// Add offset to real image
 	offset += dt.imgoffset;
 
 	// Calculate length per sector
-	length = 1 << dt.size;
+	int length = 1 << dt.size;
 
 	// Open file
+	Fileio fio;
 	if (!fio.Open(path, Fileio::ReadWrite)) {
 		return FALSE;
 	}
@@ -307,7 +279,7 @@ BOOL FASTCALL DiskTrack::Save(const Filepath& path)
 			total = 0;
 
 			// Seek
-			if (!fio.Seek(offset + ((off64_t)i << dt.size))) {
+			if (!fio.Seek(offset + ((off_t)i << dt.size))) {
 				fio.Close();
 				return FALSE;
 			}
@@ -351,9 +323,8 @@ BOOL FASTCALL DiskTrack::Save(const Filepath& path)
 //	Read Sector
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL DiskTrack::Read(BYTE *buf, int sec) const
+BOOL DiskTrack::Read(BYTE *buf, int sec) const
 {
-	ASSERT(this);
 	ASSERT(buf);
 	ASSERT((sec >= 0) & (sec < 0x100));
 
@@ -372,7 +343,7 @@ BOOL FASTCALL DiskTrack::Read(BYTE *buf, int sec) const
 	ASSERT(dt.buffer);
 	ASSERT((dt.size >= 8) && (dt.size <= 11));
 	ASSERT((dt.sectors > 0) && (dt.sectors <= 0x100));
-	memcpy(buf, &dt.buffer[(off64_t)sec << dt.size], (off64_t)1 << dt.size);
+	memcpy(buf, &dt.buffer[(off_t)sec << dt.size], (off_t)1 << dt.size);
 
 	// Success
 	return TRUE;
@@ -383,12 +354,8 @@ BOOL FASTCALL DiskTrack::Read(BYTE *buf, int sec) const
 //	Write Sector
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL DiskTrack::Write(const BYTE *buf, int sec)
+BOOL DiskTrack::Write(const BYTE *buf, int sec)
 {
-	int offset;
-	int length;
-
-	ASSERT(this);
 	ASSERT(buf);
 	ASSERT((sec >= 0) & (sec < 0x100));
 	ASSERT(!dt.raw);
@@ -404,8 +371,8 @@ BOOL FASTCALL DiskTrack::Write(const BYTE *buf, int sec)
 	}
 
 	// Calculate offset and length
-	offset = sec << dt.size;
-	length = 1 << dt.size;
+	int offset = sec << dt.size;
+	int length = 1 << dt.size;
 
 	// Compare
 	ASSERT(dt.buffer);
@@ -436,17 +403,14 @@ BOOL FASTCALL DiskTrack::Write(const BYTE *buf, int sec)
 //	Constructor
 //
 //---------------------------------------------------------------------------
-DiskCache::DiskCache(
-	const Filepath& path, int size, int blocks, off64_t imgoff)
+DiskCache::DiskCache(const Filepath& path, int size, int blocks, off_t imgoff)
 {
-	int i;
-
 	ASSERT((size >= 8) && (size <= 11));
 	ASSERT(blocks > 0);
 	ASSERT(imgoff >= 0);
 
 	// Cache work
-	for (i = 0; i < CacheMax; i++) {
+	for (int i = 0; i < CacheMax; i++) {
 		cache[i].disktrk = NULL;
 		cache[i].serial = 0;
 	}
@@ -476,9 +440,8 @@ DiskCache::~DiskCache()
 //	RAW Mode Setting
 //
 //---------------------------------------------------------------------------
-void FASTCALL DiskCache::SetRawMode(BOOL raw)
+void DiskCache::SetRawMode(BOOL raw)
 {
-	ASSERT(this);
 	ASSERT(sec_size == 11);
 
 	// Configuration
@@ -490,14 +453,10 @@ void FASTCALL DiskCache::SetRawMode(BOOL raw)
 //	Save
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL DiskCache::Save()
+BOOL DiskCache::Save()
 {
-	int i;
-
-	ASSERT(this);
-
 	// Save track
-	for (i = 0; i < CacheMax; i++) {
+	for (int i = 0; i < CacheMax; i++) {
 		// Is it a valid track?
 		if (cache[i].disktrk) {
 			// Save
@@ -515,9 +474,8 @@ BOOL FASTCALL DiskCache::Save()
 //	Get disk cache information
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL DiskCache::GetCache(int index, int& track, DWORD& aserial) const
+BOOL DiskCache::GetCache(int index, int& track, DWORD& aserial) const
 {
-	ASSERT(this);
 	ASSERT((index >= 0) && (index < CacheMax));
 
 	// FALSE if unused
@@ -537,14 +495,10 @@ BOOL FASTCALL DiskCache::GetCache(int index, int& track, DWORD& aserial) const
 //	Clear
 //
 //---------------------------------------------------------------------------
-void FASTCALL DiskCache::Clear()
+void DiskCache::Clear()
 {
-	int i;
-
-	ASSERT(this);
-
 	// Free the cache
-	for (i = 0; i < CacheMax; i++) {
+	for (int i = 0; i < CacheMax; i++) {
 		if (cache[i].disktrk) {
 			delete cache[i].disktrk;
 			cache[i].disktrk = NULL;
@@ -557,22 +511,18 @@ void FASTCALL DiskCache::Clear()
 //	Sector Read
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL DiskCache::Read(BYTE *buf, int block)
+BOOL DiskCache::Read(BYTE *buf, int block)
 {
-	int track;
-	DiskTrack *disktrk;
-
-	ASSERT(this);
 	ASSERT(sec_size != 0);
 
 	// Update first
 	Update();
 
 	// Calculate track (fixed to 256 sectors/track)
-	track = block >> 8;
+	int track = block >> 8;
 
 	// Get the track data
-	disktrk = Assign(track);
+	DiskTrack *disktrk = Assign(track);
 	if (!disktrk) {
 		return FALSE;
 	}
@@ -586,22 +536,18 @@ BOOL FASTCALL DiskCache::Read(BYTE *buf, int block)
 //	Sector write
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL DiskCache::Write(const BYTE *buf, int block)
+BOOL DiskCache::Write(const BYTE *buf, int block)
 {
-	int track;
-	DiskTrack *disktrk;
-
-	ASSERT(this);
 	ASSERT(sec_size != 0);
 
 	// Update first
 	Update();
 
 	// Calculate track (fixed to 256 sectors/track)
-	track = block >> 8;
+	int track = block >> 8;
 
 	// Get that track data
-	disktrk = Assign(track);
+	DiskTrack *disktrk = Assign(track);
 	if (!disktrk) {
 		return FALSE;
 	}
@@ -615,19 +561,13 @@ BOOL FASTCALL DiskCache::Write(const BYTE *buf, int block)
 //	Track Assignment
 //
 //---------------------------------------------------------------------------
-DiskTrack* FASTCALL DiskCache::Assign(int track)
+DiskTrack* DiskCache::Assign(int track)
 {
-	int i;
-	int c;
-	DWORD s;
-	DiskTrack *disktrk;
-
-	ASSERT(this);
 	ASSERT(sec_size != 0);
 	ASSERT(track >= 0);
 
 	// First, check if it is already assigned
-	for (i = 0; i < CacheMax; i++) {
+	for (int i = 0; i < CacheMax; i++) {
 		if (cache[i].disktrk) {
 			if (cache[i].disktrk->GetTrack() == track) {
 				// Track match
@@ -638,7 +578,7 @@ DiskTrack* FASTCALL DiskCache::Assign(int track)
 	}
 
 	// Next, check for empty
-	for (i = 0; i < CacheMax; i++) {
+	for (int i = 0; i < CacheMax; i++) {
 		if (!cache[i].disktrk) {
 			// Try loading
 			if (Load(i, track)) {
@@ -655,11 +595,11 @@ DiskTrack* FASTCALL DiskCache::Assign(int track)
 	// Finally, find the youngest serial number and delete it
 
 	// Set index 0 as candidate c
-	s = cache[0].serial;
-	c = 0;
+	DWORD s = cache[0].serial;
+	int c = 0;
 
 	// Compare candidate with serial and update to smaller one
-	for (i = 0; i < CacheMax; i++) {
+	for (int i = 0; i < CacheMax; i++) {
 		ASSERT(cache[i].disktrk);
 
 		// Compare and update the existing serial
@@ -675,7 +615,7 @@ DiskTrack* FASTCALL DiskCache::Assign(int track)
 	}
 
 	// Delete this track
-	disktrk = cache[c].disktrk;
+	DiskTrack *disktrk = cache[c].disktrk;
 	cache[c].disktrk = NULL;
 
 	// Load
@@ -694,17 +634,14 @@ DiskTrack* FASTCALL DiskCache::Assign(int track)
 //	Load cache
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL DiskCache::Load(int index, int track, DiskTrack *disktrk)
+BOOL DiskCache::Load(int index, int track, DiskTrack *disktrk)
 {
-	int sectors;
-
-	ASSERT(this);
 	ASSERT((index >= 0) && (index < CacheMax));
 	ASSERT(track >= 0);
 	ASSERT(!cache[index].disktrk);
 
 	// Get the number of sectors on this track
-	sectors = sec_blocks - (track << 8);
+	int sectors = sec_blocks - (track << 8);
 	ASSERT(sectors > 0);
 	if (sectors > 0x100) {
 		sectors = 0x100;
@@ -736,12 +673,8 @@ BOOL FASTCALL DiskCache::Load(int index, int track, DiskTrack *disktrk)
 //	Update serial number
 //
 //---------------------------------------------------------------------------
-void FASTCALL DiskCache::Update()
+void DiskCache::Update()
 {
-	int i;
-
-	ASSERT(this);
-
 	// Update and do nothing except 0
 	serial++;
 	if (serial != 0) {
@@ -749,7 +682,7 @@ void FASTCALL DiskCache::Update()
 	}
 
 	// Clear serial of all caches (loop in 32bit)
-	for (i = 0; i < CacheMax; i++) {
+	for (int i = 0; i < CacheMax; i++) {
 		cache[i].serial = 0;
 	}
 }
@@ -766,21 +699,11 @@ void FASTCALL DiskCache::Update()
 //	Constructor
 //
 //---------------------------------------------------------------------------
-Disk::Disk()
+Disk::Disk(const std::string id) : BlockDevice(id)
 {
 	// Work initialization
-	disk.id = MAKEID('N', 'U', 'L', 'L');
-	disk.ready = FALSE;
-	disk.writep = FALSE;
-	disk.readonly = FALSE;
-	disk.removable = FALSE;
-	disk.lock = FALSE;
-	disk.attn = FALSE;
-	disk.reset = FALSE;
 	disk.size = 0;
 	disk.blocks = 0;
-	disk.lun = 0;
-	disk.code = 0;
 	disk.dcache = NULL;
 	disk.imgoffset = 0;
 
@@ -796,7 +719,7 @@ Disk::Disk()
 Disk::~Disk()
 {
 	// Save disk cache
-	if (disk.ready) {
+	if (IsReady()) {
 		// Only if ready...
 		if (disk.dcache) {
 			disk.dcache->Save();
@@ -812,279 +735,35 @@ Disk::~Disk()
 
 //---------------------------------------------------------------------------
 //
-//	Reset
-//
-//---------------------------------------------------------------------------
-void FASTCALL Disk::Reset()
-{
-	ASSERT(this);
-
-	// no lock, no attention, reset
-	disk.lock = FALSE;
-	disk.attn = FALSE;
-	disk.reset = TRUE;
-}
-
-#ifndef RASCSI
-//---------------------------------------------------------------------------
-//
-//	Save
-//
-//---------------------------------------------------------------------------
-BOOL FASTCALL Disk::Save(Fileio *fio, int ver)
-{
-	DWORD sz;
-	DWORD padding;
-
-	ASSERT(this);
-	ASSERT(fio);
-
-	// Save size
-	sz = 52;
-	if (!fio->Write(&sz, sizeof(sz))) {
-		return FALSE;
-	}
-
-	// Save entity
-	PROP_EXPORT(fio, disk.id);
-	PROP_EXPORT(fio, disk.ready);
-	PROP_EXPORT(fio, disk.writep);
-	PROP_EXPORT(fio, disk.readonly);
-	PROP_EXPORT(fio, disk.removable);
-	PROP_EXPORT(fio, disk.lock);
-	PROP_EXPORT(fio, disk.attn);
-	PROP_EXPORT(fio, disk.reset);
-	PROP_EXPORT(fio, disk.size);
-	PROP_EXPORT(fio, disk.blocks);
-	PROP_EXPORT(fio, disk.lun);
-	PROP_EXPORT(fio, disk.code);
-	PROP_EXPORT(fio, padding);
-
-	// Save the path
-	if (!diskpath.Save(fio, ver)) {
-		return FALSE;
-	}
-
-	return TRUE;
-}
-
-//---------------------------------------------------------------------------
-//
-//	Load
-//
-//---------------------------------------------------------------------------
-BOOL FASTCALL Disk::Load(Fileio *fio, int ver)
-{
-	DWORD sz;
-	disk_t buf;
-	DWORD padding;
-	Filepath path;
-
-	ASSERT(this);
-	ASSERT(fio);
-
-	// Prior to version 2.03, the disk was not saved
-	if (ver <= 0x0202) {
-		return TRUE;
-	}
-
-	// Delete the current disk cache
-	if (disk.dcache) {
-		disk.dcache->Save();
-		delete disk.dcache;
-		disk.dcache = NULL;
-	}
-
-	// Load size
-	if (!fio->Read(&sz, sizeof(sz))) {
-		return FALSE;
-	}
-	if (sz != 52) {
-		return FALSE;
-	}
-
-	// Load into buffer
-	PROP_IMPORT(fio, buf.id);
-	PROP_IMPORT(fio, buf.ready);
-	PROP_IMPORT(fio, buf.writep);
-	PROP_IMPORT(fio, buf.readonly);
-	PROP_IMPORT(fio, buf.removable);
-	PROP_IMPORT(fio, buf.lock);
-	PROP_IMPORT(fio, buf.attn);
-	PROP_IMPORT(fio, buf.reset);
-	PROP_IMPORT(fio, buf.size);
-	PROP_IMPORT(fio, buf.blocks);
-	PROP_IMPORT(fio, buf.lun);
-	PROP_IMPORT(fio, buf.code);
-	PROP_IMPORT(fio, padding);
-
-	// Load path
-	if (!path.Load(fio, ver)) {
-		return FALSE;
-	}
-
-	// Move only if IDs match
-	if (disk.id == buf.id) {
-		// Do nothing if null
-		if (IsNULL()) {
-			return TRUE;
-		}
-
-		// Same type of device as when saving
-		disk.ready = FALSE;
-		if (Open(path)) {
-            // Disk cache is created in Open
-            // move only properties
-			if (!disk.readonly) {
-				disk.writep = buf.writep;
-			}
-			disk.lock = buf.lock;
-			disk.attn = buf.attn;
-			disk.reset = buf.reset;
-			disk.lun = buf.lun;
-			disk.code = buf.code;
-
-			// Loaded successfully
-			return TRUE;
-		}
-	}
-
-	// Disk cache rebuild
-	if (!IsReady()) {
-		disk.dcache = NULL;
-	} else {
-		disk.dcache = new DiskCache(diskpath, disk.size, disk.blocks);
-	}
-
-	return TRUE;
-}
-#endif	// RASCSI
-
-//---------------------------------------------------------------------------
-//
-//	NULL Check
-//
-//---------------------------------------------------------------------------
-BOOL FASTCALL Disk::IsNULL() const
-{
-	ASSERT(this);
-
-	if (disk.id == MAKEID('N', 'U', 'L', 'L')) {
-		return TRUE;
-	}
-	return FALSE;
-}
-
-//---------------------------------------------------------------------------
-//
-//	Retrieve the disk's ID
-//
-//---------------------------------------------------------------------------
-DWORD FASTCALL Disk::GetID() const
-{ 
-	return disk.id; 
-}
-
-
-//---------------------------------------------------------------------------
-//
-//	Get cache writeback mode
-//
-//---------------------------------------------------------------------------
-BOOL FASTCALL Disk::IsCacheWB() 
-{ 
-	return cache_wb; 
-}
- 
-//---------------------------------------------------------------------------
-//
-//	Set cache writeback mode
-//
-//---------------------------------------------------------------------------
-void FASTCALL Disk::SetCacheWB(BOOL enable) 
-{ 
-	cache_wb = enable; 
-}
-
-//---------------------------------------------------------------------------
-//
-//	Set unsupported command
-//
-//---------------------------------------------------------------------------
-void FASTCALL Disk::InvalidCmd()
-{ 
-	disk.code = DISK_INVALIDCMD; 
-}
-
-//---------------------------------------------------------------------------
-//
-//	SASI Check
-//
-//---------------------------------------------------------------------------
-BOOL FASTCALL Disk::IsSASI() const
-{
-	ASSERT(this);
-
-	if (disk.id == MAKEID('S', 'A', 'H', 'D')) {
-		return TRUE;
-	}
-	return FALSE;
-}
-
-//---------------------------------------------------------------------------
-//
-//	SCSI Check
-//
-//---------------------------------------------------------------------------
-BOOL FASTCALL Disk::IsSCSI() const
-{
-	ASSERT(this);
-	// If this isn't SASI, then it must be SCSI.
-	return (this->IsSASI()) ? FALSE : TRUE;
-}
-
-//---------------------------------------------------------------------------
-//
 //	Open
 //  * Call as a post-process after successful opening in a derived class
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL Disk::Open(const Filepath& path, BOOL /*attn*/)
+void Disk::Open(const Filepath& path)
 {
-	Fileio fio;
-
-	ASSERT(this);
 	ASSERT((disk.size >= 8) && (disk.size <= 11));
 	ASSERT(disk.blocks > 0);
 
-	// Ready
-	disk.ready = TRUE;
+	SetReady(true);
 
 	// Cache initialization
 	ASSERT(!disk.dcache);
-	disk.dcache =
-		new DiskCache(path, disk.size, disk.blocks, disk.imgoffset);
+	disk.dcache = new DiskCache(path, disk.size, disk.blocks, disk.imgoffset);
 
 	// Can read/write open
+	Fileio fio;
 	if (fio.Open(path, Fileio::ReadWrite)) {
-		// Write permission, not read only
-		disk.writep = FALSE;
-		disk.readonly = FALSE;
+		// Write permission
 		fio.Close();
 	} else {
-		// Write protected, read only
-		disk.writep = TRUE;
-		disk.readonly = TRUE;
+		// Permanently write-protected
+		SetReadOnly(true);
+		SetProtectable(false);
+		SetProtected(false);
 	}
 
-	// Not locked
-	disk.lock = FALSE;
-
-	// Save path
-	diskpath = path;
-
-	// Success
-	return TRUE;
+	SetLocked(false);
+	SetRemoved(false);
 }
 
 //---------------------------------------------------------------------------
@@ -1092,85 +771,17 @@ BOOL FASTCALL Disk::Open(const Filepath& path, BOOL /*attn*/)
 //	Eject
 //
 //---------------------------------------------------------------------------
-void FASTCALL Disk::Eject(BOOL force)
+bool Disk::Eject(bool force)
 {
-	ASSERT(this);
-
-	// Can only be ejected if it is removable
-	if (!disk.removable) {
-		return;
+	bool status = BlockDevice::Eject(force);
+	if (status) {
+		// Remove disk cache
+		disk.dcache->Save();
+		delete disk.dcache;
+		disk.dcache = NULL;
 	}
 
-	// If you're not ready, you don't need to eject
-	if (!disk.ready) {
-		return;
-	}
-
-	// Must be unlocked if there is no force flag
-	if (!force) {
-		if (disk.lock) {
-			return;
-		}
-	}
-
-	// Remove disk cache
-	disk.dcache->Save();
-	delete disk.dcache;
-	disk.dcache = NULL;
-
-	// Not ready, no attention
-	disk.ready = FALSE;
-	disk.writep = FALSE;
-	disk.readonly = FALSE;
-	disk.attn = FALSE;
-}
-
-//---------------------------------------------------------------------------
-//
-//	Write Protected
-//
-//---------------------------------------------------------------------------
-void FASTCALL Disk::WriteP(BOOL writep)
-{
-	ASSERT(this);
-
-	// be ready
-	if (!disk.ready) {
-		return;
-	}
-
-	// Read Only, protect only
-	if (disk.readonly) {
-		ASSERT(disk.writep);
-		return;
-	}
-
-	// Write protect flag setting
-	disk.writep = writep;
-}
-
-//---------------------------------------------------------------------------
-//
-//	Get Disk
-//
-//---------------------------------------------------------------------------
-void FASTCALL Disk::GetDisk(disk_t *buffer) const
-{
-	ASSERT(this);
-	ASSERT(buffer);
-
-	// Assign internal buffer
-	*buffer = disk;
-}
-
-//---------------------------------------------------------------------------
-//
-//	Get Path
-//
-//---------------------------------------------------------------------------
-void FASTCALL Disk::GetPath(Filepath& path) const
-{
-	path = diskpath;
+	return status;
 }
 
 //---------------------------------------------------------------------------
@@ -1178,13 +789,11 @@ void FASTCALL Disk::GetPath(Filepath& path) const
 //	Flush
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL Disk::Flush()
+bool Disk::Flush()
 {
-	ASSERT(this);
-
 	// Do nothing if there's nothing cached
 	if (!disk.dcache) {
-		return TRUE;
+		return true;
 	}
 
 	// Save cache
@@ -1196,35 +805,33 @@ BOOL FASTCALL Disk::Flush()
 //	Check Ready
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL Disk::CheckReady()
+BOOL Disk::CheckReady()
 {
-	ASSERT(this);
-
 	// Not ready if reset
-	if (disk.reset) {
-		disk.code = DISK_DEVRESET;
-		disk.reset = FALSE;
+	if (IsReset()) {
+		SetStatusCode(STATUS_DEVRESET);
+		SetReset(false);
 		LOGTRACE("%s Disk in reset", __PRETTY_FUNCTION__);
 		return FALSE;
 	}
 
 	// Not ready if it needs attention
-	if (disk.attn) {
-		disk.code = DISK_ATTENTION;
-		disk.attn = FALSE;
+	if (IsAttn()) {
+		SetStatusCode(STATUS_ATTENTION);
+		SetAttn(false);
 		LOGTRACE("%s Disk in needs attention", __PRETTY_FUNCTION__);
 		return FALSE;
 	}
 
 	// Return status if not ready
-	if (!disk.ready) {
-		disk.code = DISK_NOTREADY;
+	if (!IsReady()) {
+		SetStatusCode(STATUS_NOTREADY);
 		LOGTRACE("%s Disk not ready", __PRETTY_FUNCTION__);
 		return FALSE;
 	}
 
 	// Initialization with no error
-	disk.code = DISK_NOERROR;
+	SetStatusCode(STATUS_NOERROR);
 	LOGTRACE("%s Disk is ready!", __PRETTY_FUNCTION__);
 
 	return TRUE;
@@ -1236,13 +843,10 @@ BOOL FASTCALL Disk::CheckReady()
 //	*You need to be successful at all times
 //
 //---------------------------------------------------------------------------
-int FASTCALL Disk::Inquiry(
-	const DWORD* /*cdb*/, BYTE* /*buf*/, DWORD /*major*/, DWORD /*minor*/)
+int Disk::Inquiry(const DWORD* /*cdb*/, BYTE* /*buf*/)
 {
-	ASSERT(this);
-
 	// default is INQUIRY failure
-	disk.code = DISK_INVALIDCMD;
+	SetStatusCode(STATUS_INVALIDCMD);
 	return 0;
 }
 
@@ -1252,23 +856,20 @@ int FASTCALL Disk::Inquiry(
 //	*SASI is a separate process
 //
 //---------------------------------------------------------------------------
-int FASTCALL Disk::RequestSense(const DWORD *cdb, BYTE *buf)
+int Disk::RequestSense(const DWORD *cdb, BYTE *buf)
 {
-	int size;
-
-	ASSERT(this);
 	ASSERT(cdb);
 	ASSERT(buf);
 
 	// Return not ready only if there are no errors
-	if (disk.code == DISK_NOERROR) {
-		if (!disk.ready) {
-			disk.code = DISK_NOTREADY;
+	if (GetStatusCode() == STATUS_NOERROR) {
+		if (!IsReady()) {
+			SetStatusCode(STATUS_NOTREADY);
 		}
 	}
 
 	// Size determination (according to allocation length)
-	size = (int)cdb[4];
+	int size = (int)cdb[4];
 	LOGTRACE("%s size of data = %d", __PRETTY_FUNCTION__, size);
 	ASSERT((size >= 0) && (size < 0x100));
 
@@ -1282,14 +883,17 @@ int FASTCALL Disk::RequestSense(const DWORD *cdb, BYTE *buf)
 	memset(buf, 0, size);
 
 	// Set 18 bytes including extended sense data
+
+	// Current error
 	buf[0] = 0x70;
-	buf[2] = (BYTE)(disk.code >> 16);
+
+	buf[2] = (BYTE)(GetStatusCode() >> 16);
 	buf[7] = 10;
-	buf[12] = (BYTE)(disk.code >> 8);
-	buf[13] = (BYTE)disk.code;
+	buf[12] = (BYTE)(GetStatusCode() >> 8);
+	buf[13] = (BYTE)GetStatusCode();
 
 	// Clear the code
-	disk.code = 0x00;
+	SetStatusCode(STATUS_NOERROR);
 
 	return size;
 }
@@ -1300,24 +904,21 @@ int FASTCALL Disk::RequestSense(const DWORD *cdb, BYTE *buf)
 //	*Not affected by disk.code
 //
 //---------------------------------------------------------------------------
-int FASTCALL Disk::SelectCheck(const DWORD *cdb)
+int Disk::SelectCheck(const DWORD *cdb)
 {
-	int length;
-
-	ASSERT(this);
 	ASSERT(cdb);
 
-	// Error if save parameters are set instead of SCSIHD
-	if (disk.id != MAKEID('S', 'C', 'H', 'D')) {
+	// Error if save parameters are set instead of SCSIHD or SCSIRM
+	if (!IsSCSI()) {
 		// Error if save parameters are set
 		if (cdb[1] & 0x01) {
-			disk.code = DISK_INVALIDCDB;
+			SetStatusCode(STATUS_INVALIDCDB);
 			return 0;
 		}
 	}
 
 	// Receive the data specified by the parameter length
-	length = (int)cdb[4];
+	int length = (int)cdb[4];
 	return length;
 }
 
@@ -1328,23 +929,20 @@ int FASTCALL Disk::SelectCheck(const DWORD *cdb)
 //	* Not affected by disk.code
 //
 //---------------------------------------------------------------------------
-int FASTCALL Disk::SelectCheck10(const DWORD *cdb)
+int Disk::SelectCheck10(const DWORD *cdb)
 {
-	DWORD length;
-
-	ASSERT(this);
 	ASSERT(cdb);
 
-	// Error if save parameters are set instead of SCSIHD
-	if (disk.id != MAKEID('S', 'C', 'H', 'D')) {
+	// Error if save parameters are set instead of SCSIHD or SCSIRM
+	if (!IsSCSI()) {
 		if (cdb[1] & 0x01) {
-			disk.code = DISK_INVALIDCDB;
+			SetStatusCode(STATUS_INVALIDCDB);
 			return 0;
 		}
 	}
 
 	// Receive the data specified by the parameter length
-	length = cdb[7];
+	DWORD length = cdb[7];
 	length <<= 8;
 	length |= cdb[8];
 	if (length > 0x800) {
@@ -1360,17 +958,15 @@ int FASTCALL Disk::SelectCheck10(const DWORD *cdb)
 //	* Not affected by disk.code
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL Disk::ModeSelect(
-	const DWORD* /*cdb*/, const BYTE *buf, int length)
+bool Disk::ModeSelect(const DWORD* /*cdb*/, const BYTE *buf, int length)
 {
-	ASSERT(this);
 	ASSERT(buf);
 	ASSERT(length >= 0);
 
 	// cannot be set
-	disk.code = DISK_INVALIDPRM;
+	SetStatusCode(STATUS_INVALIDPRM);
 
-	return FALSE;
+	return false;
 }
 
 //---------------------------------------------------------------------------
@@ -1379,50 +975,34 @@ BOOL FASTCALL Disk::ModeSelect(
 //	*Not affected by disk.code
 //
 //---------------------------------------------------------------------------
-int FASTCALL Disk::ModeSense(const DWORD *cdb, BYTE *buf)
+int Disk::ModeSense(const DWORD *cdb, BYTE *buf)
 {
-	int page;
-	int length;
-	int size;
-	BOOL valid;
-	BOOL change;
-	int ret;
-
-	ASSERT(this);
 	ASSERT(cdb);
 	ASSERT(buf);
 	ASSERT(cdb[0] == 0x1a);
 
 	// Get length, clear buffer
-	length = (int)cdb[4];
+	int length = (int)cdb[4];
 	ASSERT((length >= 0) && (length < 0x100));
 	memset(buf, 0, length);
 
 	// Get changeable flag
-	if ((cdb[2] & 0xc0) == 0x40) {
-		change = TRUE;
-	} else {
-		change = FALSE;
-	}
+	bool change = (cdb[2] & 0xc0) == 0x40;
 
 	// Get page code (0x00 is valid from the beginning)
-	page = cdb[2] & 0x3f;
-	if (page == 0x00) {
-		valid = TRUE;
-	} else {
-		valid = FALSE;
-	}
+	int page = cdb[2] & 0x3f;
+	bool valid = page == 0x00;
 
 	// Basic information
-	size = 4;
+	int size = 4;
 
 	// MEDIUM TYPE
-	if (disk.id == MAKEID('S', 'C', 'M', 'O')) {
+	if (IsMo()) {
 		buf[1] = 0x03; // optical reversible or erasable
 	}
 
 	// DEVICE SPECIFIC PARAMETER
-	if (disk.writep) {
+	if (IsProtected()) {
 		buf[2] = 0x80;
 	}
 
@@ -1432,7 +1012,7 @@ int FASTCALL Disk::ModeSense(const DWORD *cdb, BYTE *buf)
 		buf[3] = 0x08;
 
 		// Only if ready
-		if (disk.ready) {
+		if (IsReady()) {
 			// Block descriptor (number of blocks)
 			buf[5] = (BYTE)(disk.blocks >> 16);
 			buf[6] = (BYTE)(disk.blocks >> 8);
@@ -1452,56 +1032,56 @@ int FASTCALL Disk::ModeSense(const DWORD *cdb, BYTE *buf)
 	// Page code 1(read-write error recovery)
 	if ((page == 0x01) || (page == 0x3f)) {
 		size += AddError(change, &buf[size]);
-		valid = TRUE;
+		valid = true;
 	}
 
 	// Page code 3(format device)
 	if ((page == 0x03) || (page == 0x3f)) {
 		size += AddFormat(change, &buf[size]);
-		valid = TRUE;
+		valid = true;
 	}
 
 	// Page code 4(drive parameter)
 	if ((page == 0x04) || (page == 0x3f)) {
 		size += AddDrive(change, &buf[size]);
-		valid = TRUE;
+		valid = true;
 	}
 
 	// Page code 6(optical)
-	if (disk.id == MAKEID('S', 'C', 'M', 'O')) {
+	if (IsMo()) {
 		if ((page == 0x06) || (page == 0x3f)) {
 			size += AddOpt(change, &buf[size]);
-			valid = TRUE;
+			valid = true;
 		}
 	}
 
 	// Page code 8(caching)
 	if ((page == 0x08) || (page == 0x3f)) {
 		size += AddCache(change, &buf[size]);
-		valid = TRUE;
+		valid = true;
 	}
 
 	// Page code 13(CD-ROM)
-	if (disk.id == MAKEID('S', 'C', 'C', 'D')) {
+	if (IsCdRom()) {
 		if ((page == 0x0d) || (page == 0x3f)) {
 			size += AddCDROM(change, &buf[size]);
-			valid = TRUE;
+			valid = true;
 		}
 	}
 
 	// Page code 14(CD-DA)
-	if (disk.id == MAKEID('S', 'C', 'C', 'D')) {
+	if (IsCdRom()) {
 		if ((page == 0x0e) || (page == 0x3f)) {
 			size += AddCDDA(change, &buf[size]);
-			valid = TRUE;
+			valid = true;
 		}
 	}
 
 	// Page (vendor special)
-	ret = AddVendor(page, change, &buf[size]);
+	int ret = AddVendor(page, change, &buf[size]);
 	if (ret > 0) {
 		size += ret;
-		valid = TRUE;
+		valid = true;
 	}
 
 	// final setting of mode data length
@@ -1509,12 +1089,12 @@ int FASTCALL Disk::ModeSense(const DWORD *cdb, BYTE *buf)
 
 	// Unsupported page
 	if (!valid) {
-		disk.code = DISK_INVALIDCDB;
+		SetStatusCode(STATUS_INVALIDCDB);
 		return 0;
 	}
 
 	// MODE SENSE success
-	disk.code = DISK_NOERROR;
+	SetStatusCode(STATUS_NOERROR);
 	return length;
 }
 
@@ -1524,22 +1104,16 @@ int FASTCALL Disk::ModeSense(const DWORD *cdb, BYTE *buf)
 //	*Not affected by disk.code
 //
 //---------------------------------------------------------------------------
-int FASTCALL Disk::ModeSense10(const DWORD *cdb, BYTE *buf)
+int Disk::ModeSense10(const DWORD *cdb, BYTE *buf)
 {
-	int page;
-	int length;
-	int size;
-	BOOL valid;
-	BOOL change;
 	int ret;
 
-	ASSERT(this);
 	ASSERT(cdb);
 	ASSERT(buf);
 	ASSERT(cdb[0] == 0x5a);
 
 	// Get length, clear buffer
-	length = cdb[7];
+	int length = cdb[7];
 	length <<= 8;
 	length |= cdb[8];
 	if (length > 0x800) {
@@ -1549,23 +1123,15 @@ int FASTCALL Disk::ModeSense10(const DWORD *cdb, BYTE *buf)
 	memset(buf, 0, length);
 
 	// Get changeable flag
-	if ((cdb[2] & 0xc0) == 0x40) {
-		change = TRUE;
-	} else {
-		change = FALSE;
-	}
+	bool change = (cdb[2] & 0xc0) == 0x40;
 
 	// Get page code (0x00 is valid from the beginning)
-	page = cdb[2] & 0x3f;
-	if (page == 0x00) {
-		valid = TRUE;
-	} else {
-		valid = FALSE;
-	}
+	int page = cdb[2] & 0x3f;
+	bool valid = page == 0x00;
 
 	// Basic Information
-	size = 4;
-	if (disk.writep) {
+	int size = 4;
+	if (IsProtected()) {
 		buf[2] = 0x80;
 	}
 
@@ -1575,7 +1141,7 @@ int FASTCALL Disk::ModeSense10(const DWORD *cdb, BYTE *buf)
 		buf[3] = 0x08;
 
 		// Only if ready
-		if (disk.ready) {
+		if (IsReady()) {
 			// Block descriptor (number of blocks)
 			buf[5] = (BYTE)(disk.blocks >> 16);
 			buf[6] = (BYTE)(disk.blocks >> 8);
@@ -1595,48 +1161,48 @@ int FASTCALL Disk::ModeSense10(const DWORD *cdb, BYTE *buf)
 	// Page code 1(read-write error recovery)
 	if ((page == 0x01) || (page == 0x3f)) {
 		size += AddError(change, &buf[size]);
-		valid = TRUE;
+		valid = true;
 	}
 
 	// Page code 3(format device)
 	if ((page == 0x03) || (page == 0x3f)) {
 		size += AddFormat(change, &buf[size]);
-		valid = TRUE;
+		valid = true;
 	}
 
 	// Page code 4(drive parameter)
 	if ((page == 0x04) || (page == 0x3f)) {
 		size += AddDrive(change, &buf[size]);
-		valid = TRUE;
+		valid = true;
 	}
 
 	// ペPage code 6(optical)
-	if (disk.id == MAKEID('S', 'C', 'M', 'O')) {
+	if (IsMo()) {
 		if ((page == 0x06) || (page == 0x3f)) {
 			size += AddOpt(change, &buf[size]);
-			valid = TRUE;
+			valid = true;
 		}
 	}
 
 	// Page code 8(caching)
 	if ((page == 0x08) || (page == 0x3f)) {
 		size += AddCache(change, &buf[size]);
-		valid = TRUE;
+		valid = true;
 	}
 
 	// Page code 13(CD-ROM)
-	if (disk.id == MAKEID('S', 'C', 'C', 'D')) {
+	if (IsCdRom()) {
 		if ((page == 0x0d) || (page == 0x3f)) {
 			size += AddCDROM(change, &buf[size]);
-			valid = TRUE;
+			valid = true;
 		}
 	}
 
 	// Page code 14(CD-DA)
-	if (disk.id == MAKEID('S', 'C', 'C', 'D')) {
+	if (IsCdRom()) {
 		if ((page == 0x0e) || (page == 0x3f)) {
 			size += AddCDDA(change, &buf[size]);
-			valid = TRUE;
+			valid = true;
 		}
 	}
 
@@ -1644,7 +1210,7 @@ int FASTCALL Disk::ModeSense10(const DWORD *cdb, BYTE *buf)
 	ret = AddVendor(page, change, &buf[size]);
 	if (ret > 0) {
 		size += ret;
-		valid = TRUE;
+		valid = true;
 	}
 
 	// final setting of mode data length
@@ -1652,12 +1218,12 @@ int FASTCALL Disk::ModeSense10(const DWORD *cdb, BYTE *buf)
 
 	// Unsupported page
 	if (!valid) {
-		disk.code = DISK_INVALIDCDB;
+		SetStatusCode(STATUS_INVALIDCDB);
 		return 0;
 	}
 
 	// MODE SENSE success
-	disk.code = DISK_NOERROR;
+	SetStatusCode(STATUS_NOERROR);
 	return length;
 }
 
@@ -1666,9 +1232,8 @@ int FASTCALL Disk::ModeSense10(const DWORD *cdb, BYTE *buf)
 //	Add error page
 //
 //---------------------------------------------------------------------------
-int FASTCALL Disk::AddError(BOOL change, BYTE *buf)
+int Disk::AddError(bool change, BYTE *buf)
 {
-	ASSERT(this);
 	ASSERT(buf);
 
 	// Set the message length
@@ -1689,11 +1254,10 @@ int FASTCALL Disk::AddError(BOOL change, BYTE *buf)
 //	Add format page
 //
 //---------------------------------------------------------------------------
-int FASTCALL Disk::AddFormat(BOOL change, BYTE *buf)
+int Disk::AddFormat(bool change, BYTE *buf)
 {
 	int size;
 
-	ASSERT(this);
 	ASSERT(buf);
 
 	// Set the message length
@@ -1708,7 +1272,7 @@ int FASTCALL Disk::AddFormat(BOOL change, BYTE *buf)
 		return 24;
 	}
 
-	if (disk.ready) {
+	if (IsReady()) {
 		// Set the number of tracks in one zone to 8 (TODO)
 		buf[0x3] = 0x08;
 
@@ -1723,7 +1287,7 @@ int FASTCALL Disk::AddFormat(BOOL change, BYTE *buf)
 	}
 
 	// Set removable attribute
-	if (disk.removable) {
+	if (IsRemovable()) {
 		buf[20] = 0x20;
 	}
 
@@ -1735,11 +1299,8 @@ int FASTCALL Disk::AddFormat(BOOL change, BYTE *buf)
 //	Add drive page
 //
 //---------------------------------------------------------------------------
-int FASTCALL Disk::AddDrive(BOOL change, BYTE *buf)
+int Disk::AddDrive(bool change, BYTE *buf)
 {
-	DWORD cylinder;
-
-	ASSERT(this);
 	ASSERT(buf);
 
 	// Set the message length
@@ -1751,10 +1312,10 @@ int FASTCALL Disk::AddDrive(BOOL change, BYTE *buf)
 		return 24;
 	}
 
-	if (disk.ready) {
+	if (IsReady()) {
 		// Set the number of cylinders (total number of blocks
         // divided by 25 sectors/track and 8 heads)
-		cylinder = disk.blocks;
+		DWORD cylinder = disk.blocks;
 		cylinder >>= 3;
 		cylinder /= 25;
 		buf[0x2] = (BYTE)(cylinder >> 16);
@@ -1773,9 +1334,8 @@ int FASTCALL Disk::AddDrive(BOOL change, BYTE *buf)
 //	Add option
 //
 //---------------------------------------------------------------------------
-int FASTCALL Disk::AddOpt(BOOL change, BYTE *buf)
+int Disk::AddOpt(bool change, BYTE *buf)
 {
-	ASSERT(this);
 	ASSERT(buf);
 
 	// Set the message length
@@ -1796,9 +1356,8 @@ int FASTCALL Disk::AddOpt(BOOL change, BYTE *buf)
 //	Add Cache Page
 //
 //---------------------------------------------------------------------------
-int FASTCALL Disk::AddCache(BOOL change, BYTE *buf)
+int Disk::AddCache(bool change, BYTE *buf)
 {
-	ASSERT(this);
 	ASSERT(buf);
 
 	// Set the message length
@@ -1819,9 +1378,8 @@ int FASTCALL Disk::AddCache(BOOL change, BYTE *buf)
 //	Add CDROM Page
 //
 //---------------------------------------------------------------------------
-int FASTCALL Disk::AddCDROM(BOOL change, BYTE *buf)
+int Disk::AddCDROM(bool change, BYTE *buf)
 {
-	ASSERT(this);
 	ASSERT(buf);
 
 	// Set the message length
@@ -1848,9 +1406,8 @@ int FASTCALL Disk::AddCDROM(BOOL change, BYTE *buf)
 //	CD-DAページ追加
 //
 //---------------------------------------------------------------------------
-int FASTCALL Disk::AddCDDA(BOOL change, BYTE *buf)
+int Disk::AddCDDA(bool change, BYTE *buf)
 {
-	ASSERT(this);
 	ASSERT(buf);
 
 	// Set the message length
@@ -1872,9 +1429,8 @@ int FASTCALL Disk::AddCDDA(BOOL change, BYTE *buf)
 //	Add special vendor page
 //
 //---------------------------------------------------------------------------
-int FASTCALL Disk::AddVendor(int /*page*/, BOOL /*change*/, BYTE *buf)
+int Disk::AddVendor(int /*page*/, bool /*change*/, BYTE *buf)
 {
-	ASSERT(this);
 	ASSERT(buf);
 
 	return 0;
@@ -1886,17 +1442,14 @@ int FASTCALL Disk::AddVendor(int /*page*/, BOOL /*change*/, BYTE *buf)
 //	*Not affected by disk.code
 //
 //---------------------------------------------------------------------------
-int FASTCALL Disk::ReadDefectData10(const DWORD *cdb, BYTE *buf)
+int Disk::ReadDefectData10(const DWORD *cdb, BYTE *buf)
 {
-	DWORD length;
-
-	ASSERT(this);
 	ASSERT(cdb);
 	ASSERT(buf);
 	ASSERT(cdb[0] == 0x37);
 
 	// Get length, clear buffer
-	length = cdb[7];
+	DWORD length = cdb[7];
 	length <<= 8;
 	length |= cdb[8];
 	if (length > 0x800) {
@@ -1920,7 +1473,7 @@ int FASTCALL Disk::ReadDefectData10(const DWORD *cdb, BYTE *buf)
 	buf[11] = 0xff;
 
 	// no list
-	disk.code = DISK_NODEFECT;
+	SetStatusCode(STATUS_NODEFECT);
 	return 4;
 }
 
@@ -1935,17 +1488,10 @@ int FASTCALL Disk::ReadDefectData10(const DWORD *cdb, BYTE *buf)
 //	TEST UNIT READY
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL Disk::TestUnitReady(const DWORD* /*cdb*/)
+bool Disk::TestUnitReady(const DWORD* /*cdb*/)
 {
-	ASSERT(this);
-
 	// Status check
-	if (!CheckReady()) {
-		return FALSE;
-	}
-
-	// TEST UNIT READY Success
-	return TRUE;
+	return CheckReady();
 }
 
 //---------------------------------------------------------------------------
@@ -1953,17 +1499,10 @@ BOOL FASTCALL Disk::TestUnitReady(const DWORD* /*cdb*/)
 //	REZERO UNIT
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL Disk::Rezero(const DWORD* /*cdb*/)
+bool Disk::Rezero(const DWORD* /*cdb*/)
 {
-	ASSERT(this);
-
 	// Status check
-	if (!CheckReady()) {
-		return FALSE;
-	}
-
-	// REZERO Success
-	return TRUE;
+	return CheckReady();
 }
 
 //---------------------------------------------------------------------------
@@ -1972,23 +1511,21 @@ BOOL FASTCALL Disk::Rezero(const DWORD* /*cdb*/)
 //	*Opcode $06 for SASI, Opcode $04 for SCSI
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL Disk::Format(const DWORD *cdb)
+bool Disk::Format(const DWORD *cdb)
 {
-	ASSERT(this);
-
 	// Status check
 	if (!CheckReady()) {
-		return FALSE;
+		return false;
 	}
 
 	// FMTDATA=1 is not supported (but OK if there is no DEFECT LIST)
 	if ((cdb[1] & 0x10) != 0 && cdb[4] != 0) {
-		disk.code = DISK_INVALIDCDB;
-		return FALSE;
+		SetStatusCode(STATUS_INVALIDCDB);
+		return false;
 	}
 
 	// FORMAT Success
-	return TRUE;
+	return true;
 }
 
 //---------------------------------------------------------------------------
@@ -1996,17 +1533,10 @@ BOOL FASTCALL Disk::Format(const DWORD *cdb)
 //	REASSIGN BLOCKS
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL Disk::Reassign(const DWORD* /*cdb*/)
+bool Disk::Reassign(const DWORD* /*cdb*/)
 {
-	ASSERT(this);
-
 	// Status check
-	if (!CheckReady()) {
-		return FALSE;
-	}
-
-	// REASSIGN BLOCKS Success
-	return TRUE;
+	return CheckReady();
 }
 
 //---------------------------------------------------------------------------
@@ -2014,10 +1544,11 @@ BOOL FASTCALL Disk::Reassign(const DWORD* /*cdb*/)
 //	READ
 //
 //---------------------------------------------------------------------------
-int FASTCALL Disk::Read(const DWORD *cdb, BYTE *buf, DWORD block)
+int Disk::Read(const DWORD *cdb, BYTE *buf, DWORD block)
 {
-	ASSERT(this);
 	ASSERT(buf);
+
+	LOGTRACE("%s", __PRETTY_FUNCTION__);
 
 	// Status check
 	if (!CheckReady()) {
@@ -2026,13 +1557,13 @@ int FASTCALL Disk::Read(const DWORD *cdb, BYTE *buf, DWORD block)
 
 	// Error if the total number of blocks is exceeded
 	if (block >= disk.blocks) {
-		disk.code = DISK_INVALIDLBA;
+		SetStatusCode(STATUS_INVALIDLBA);
 		return 0;
 	}
 
 	// leave it to the cache
 	if (!disk.dcache->Read(buf, block)) {
-		disk.code = DISK_READFAULT;
+		SetStatusCode(STATUS_READFAULT);
 		return 0;
 	}
 
@@ -2045,23 +1576,24 @@ int FASTCALL Disk::Read(const DWORD *cdb, BYTE *buf, DWORD block)
 //	WRITE check
 //
 //---------------------------------------------------------------------------
-int FASTCALL Disk::WriteCheck(DWORD block)
+int Disk::WriteCheck(DWORD block)
 {
-	ASSERT(this);
-
 	// Status check
 	if (!CheckReady()) {
+		LOGDEBUG("WriteCheck failed (not ready)");
 		return 0;
 	}
 
 	// Error if the total number of blocks is exceeded
 	if (block >= disk.blocks) {
+		LOGDEBUG("WriteCheck failed (capacity exceeded)");
 		return 0;
 	}
 
 	// Error if write protected
-	if (disk.writep) {
-		disk.code = DISK_WRITEPROTECT;
+	if (IsProtected()) {
+		LOGDEBUG("WriteCheck failed (protected)");
+		SetStatusCode(STATUS_WRITEPROTECT);
 		return 0;
 	}
 
@@ -2074,39 +1606,39 @@ int FASTCALL Disk::WriteCheck(DWORD block)
 //	WRITE
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL Disk::Write(const DWORD *cdb, const BYTE *buf, DWORD block)
+bool Disk::Write(const DWORD *cdb, const BYTE *buf, DWORD block)
 {
-	ASSERT(this);
 	ASSERT(buf);
 
 	LOGTRACE("%s", __PRETTY_FUNCTION__);
+
 	// Error if not ready
-	if (!disk.ready) {
-		disk.code = DISK_NOTREADY;
-		return FALSE;
+	if (!IsReady()) {
+		SetStatusCode(STATUS_NOTREADY);
+		return false;
 	}
 
 	// Error if the total number of blocks is exceeded
 	if (block >= disk.blocks) {
-		disk.code = DISK_INVALIDLBA;
-		return FALSE;
+		SetStatusCode(STATUS_INVALIDLBA);
+		return false;
 	}
 
 	// Error if write protected
-	if (disk.writep) {
-		disk.code = DISK_WRITEPROTECT;
-		return FALSE;
+	if (IsProtected()) {
+		SetStatusCode(STATUS_WRITEPROTECT);
+		return false;
 	}
 
 	// Leave it to the cache
 	if (!disk.dcache->Write(buf, block)) {
-		disk.code = DISK_WRITEFAULT;
-		return FALSE;
+		SetStatusCode(STATUS_WRITEFAULT);
+		return false;
 	}
 
 	//  Success
-	disk.code = DISK_NOERROR;
-	return TRUE;
+	SetStatusCode(STATUS_NOERROR);
+	return true;
 }
 
 //---------------------------------------------------------------------------
@@ -2115,17 +1647,10 @@ BOOL FASTCALL Disk::Write(const DWORD *cdb, const BYTE *buf, DWORD block)
 //	*Does not check LBA (SASI IOCS)
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL Disk::Seek(const DWORD* /*cdb*/)
+bool Disk::Seek(const DWORD* /*cdb*/)
 {
-	ASSERT(this);
-
 	// Status check
-	if (!CheckReady()) {
-		return FALSE;
-	}
-
-	// SEEK Success
-	return TRUE;
+	return CheckReady();
 }
 
 //---------------------------------------------------------------------------
@@ -2133,17 +1658,10 @@ BOOL FASTCALL Disk::Seek(const DWORD* /*cdb*/)
 //	ASSIGN
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL Disk::Assign(const DWORD* /*cdb*/)
+bool Disk::Assign(const DWORD* /*cdb*/)
 {
-	ASSERT(this);
-
 	// Status check
-	if (!CheckReady()) {
-		return FALSE;
-	}
-
-	//  Success
-	return TRUE;
+	return CheckReady();
 }
 
 //---------------------------------------------------------------------------
@@ -2151,17 +1669,10 @@ BOOL FASTCALL Disk::Assign(const DWORD* /*cdb*/)
 //	SPECIFY
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL Disk::Specify(const DWORD* /*cdb*/)
+bool Disk::Specify(const DWORD* /*cdb*/)
 {
-	ASSERT(this);
-
 	// Status check
-	if (!CheckReady()) {
-		return FALSE;
-	}
-
-	//  Success
-	return TRUE;
+	return CheckReady();
 }
 
 //---------------------------------------------------------------------------
@@ -2169,27 +1680,26 @@ BOOL FASTCALL Disk::Specify(const DWORD* /*cdb*/)
 //	START STOP UNIT
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL Disk::StartStop(const DWORD *cdb)
+bool Disk::StartStop(const DWORD *cdb)
 {
-	ASSERT(this);
 	ASSERT(cdb);
 	ASSERT(cdb[0] == 0x1b);
 
 	// Look at the eject bit and eject if necessary
 	if (cdb[4] & 0x02) {
-		if (disk.lock) {
+		if (IsLocked()) {
 			// Cannot be ejected because it is locked
-			disk.code = DISK_PREVENT;
-			return FALSE;
+			SetStatusCode(STATUS_PREVENT);
+			return false;
 		}
 
 		// Eject
-		Eject(FALSE);
+		Eject(false);
 	}
 
 	// OK
-	disk.code = DISK_NOERROR;
-	return TRUE;
+	SetStatusCode(STATUS_NOERROR);
+	return true;
 }
 
 //---------------------------------------------------------------------------
@@ -2197,27 +1707,26 @@ BOOL FASTCALL Disk::StartStop(const DWORD *cdb)
 //	SEND DIAGNOSTIC
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL Disk::SendDiag(const DWORD *cdb)
+bool Disk::SendDiag(const DWORD *cdb)
 {
-	ASSERT(this);
 	ASSERT(cdb);
 	ASSERT(cdb[0] == 0x1d);
 
 	// Do not support PF bit
 	if (cdb[1] & 0x10) {
-		disk.code = DISK_INVALIDCDB;
-		return FALSE;
+		SetStatusCode(STATUS_INVALIDCDB);
+		return false;
 	}
 
 	// Do not support parameter list
 	if ((cdb[3] != 0) || (cdb[4] != 0)) {
-		disk.code = DISK_INVALIDCDB;
-		return FALSE;
+		SetStatusCode(STATUS_INVALIDCDB);
+		return false;
 	}
 
 	// Always successful
-	disk.code = DISK_NOERROR;
-	return TRUE;
+	SetStatusCode(STATUS_NOERROR);
+	return true;
 }
 
 //---------------------------------------------------------------------------
@@ -2225,26 +1734,21 @@ BOOL FASTCALL Disk::SendDiag(const DWORD *cdb)
 //	PREVENT/ALLOW MEDIUM REMOVAL
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL Disk::Removal(const DWORD *cdb)
+bool Disk::Removal(const DWORD *cdb)
 {
-	ASSERT(this);
 	ASSERT(cdb);
 	ASSERT(cdb[0] == 0x1e);
 
 	// Status check
 	if (!CheckReady()) {
-		return FALSE;
+		return false;
 	}
 
 	// Set Lock flag
-	if (cdb[4] & 0x01) {
-		disk.lock = TRUE;
-	} else {
-		disk.lock = FALSE;
-	}
+	SetLocked(cdb[4] & 0x01);
 
 	// REMOVAL Success
-	return TRUE;
+	return true;
 }
 
 //---------------------------------------------------------------------------
@@ -2252,12 +1756,8 @@ BOOL FASTCALL Disk::Removal(const DWORD *cdb)
 //	READ CAPACITY
 //
 //---------------------------------------------------------------------------
-int FASTCALL Disk::ReadCapacity(const DWORD* /*cdb*/, BYTE *buf)
+int Disk::ReadCapacity10(const DWORD* /*cdb*/, BYTE *buf)
 {
-	DWORD blocks;
-	DWORD length;
-
-	ASSERT(this);
 	ASSERT(buf);
 
 	// Buffer clear
@@ -2268,16 +1768,21 @@ int FASTCALL Disk::ReadCapacity(const DWORD* /*cdb*/, BYTE *buf)
 		return 0;
 	}
 
+	if (disk.blocks <= 0) {
+		LOGWARN("%s Capacity not available, medium may not be present", __PRETTY_FUNCTION__);
+
+		return -1;
+	}
+
 	// Create end of logical block address (disk.blocks-1)
-	ASSERT(disk.blocks > 0);
-	blocks = disk.blocks - 1;
+	DWORD blocks = disk.blocks - 1;
 	buf[0] = (BYTE)(blocks >> 24);
 	buf[1] = (BYTE)(blocks >> 16);
 	buf[2] = (BYTE)(blocks >> 8);
 	buf[3] = (BYTE)blocks;
 
 	// Create block length (1 << disk.size)
-	length = 1 << disk.size;
+	DWORD length = 1 << disk.size;
 	buf[4] = (BYTE)(length >> 24);
 	buf[5] = (BYTE)(length >> 16);
 	buf[6] = (BYTE)(length >> 8);
@@ -2287,45 +1792,106 @@ int FASTCALL Disk::ReadCapacity(const DWORD* /*cdb*/, BYTE *buf)
 	return 8;
 }
 
-//---------------------------------------------------------------------------
-//
-//	VERIFY
-//
-//---------------------------------------------------------------------------
-BOOL FASTCALL Disk::Verify(const DWORD *cdb)
+int Disk::ReadCapacity16(const DWORD* /*cdb*/, BYTE *buf)
 {
-	DWORD record;
-	DWORD blocks;
+	ASSERT(buf);
 
-	ASSERT(this);
-	ASSERT(cdb);
-	ASSERT(cdb[0] == 0x2f);
-
-	// Get parameters
-	record = cdb[2];
-	record <<= 8;
-	record |= cdb[3];
-	record <<= 8;
-	record |= cdb[4];
-	record <<= 8;
-	record |= cdb[5];
-	blocks = cdb[7];
-	blocks <<= 8;
-	blocks |= cdb[8];
+	// Buffer clear
+	memset(buf, 0, 14);
 
 	// Status check
 	if (!CheckReady()) {
 		return 0;
 	}
 
+	if (disk.blocks <= 0) {
+		LOGWARN("%s Capacity not available, medium may not be present", __PRETTY_FUNCTION__);
+
+		return -1;
+	}
+
+	// Create end of logical block address (disk.blocks-1)
+	// TODO blocks should be a 64 bit value in order to support higher capacities
+	DWORD blocks = disk.blocks - 1;
+	buf[4] = (BYTE)(blocks >> 24);
+	buf[5] = (BYTE)(blocks >> 16);
+	buf[6] = (BYTE)(blocks >> 8);
+	buf[7] = (BYTE)blocks;
+
+	// Create block length (1 << disk.size)
+	DWORD length = 1 << disk.size;
+	buf[8] = (BYTE)(length >> 24);
+	buf[9] = (BYTE)(length >> 16);
+	buf[10] = (BYTE)(length >> 8);
+	buf[11] = (BYTE)length;
+
+	// Logical blocks per physical block: not reported (1 or more)
+	buf[13] = 0;
+
+	// return the size
+	return 14;
+}
+
+//---------------------------------------------------------------------------
+//
+//	REPORT LUNS
+//
+//---------------------------------------------------------------------------
+int Disk::ReportLuns(const DWORD* /*cdb*/, BYTE *buf)
+{
+	ASSERT(buf);
+
+	// Buffer clear
+	memset(buf, 0, 16);
+
+	// Status check
+	if (!CheckReady()) {
+		return 0;
+	}
+
+	// LUN list length
+	buf[3] = 8;
+
+	// As long as there is no proper support for more than one SCSI LUN no other fields must be set => 1 LUN
+
+	return 16;
+}
+
+//---------------------------------------------------------------------------
+//
+//	VERIFY
+//
+//---------------------------------------------------------------------------
+bool Disk::Verify(const DWORD *cdb)
+{
+	ASSERT(cdb);
+	ASSERT(cdb[0] == 0x2f);
+
+	// Get parameters
+	DWORD record = cdb[2];
+	record <<= 8;
+	record |= cdb[3];
+	record <<= 8;
+	record |= cdb[4];
+	record <<= 8;
+	record |= cdb[5];
+	DWORD blocks = cdb[7];
+	blocks <<= 8;
+	blocks |= cdb[8];
+
+	// Status check
+	if (!CheckReady()) {
+		return false;
+	}
+
 	// Parameter check
 	if (disk.blocks < (record + blocks)) {
-		disk.code = DISK_INVALIDLBA;
-		return FALSE;
+		SetStatusCode(STATUS_INVALIDLBA);
+		return false;
 	}
 
 	//  Success
-	return TRUE;
+	return true;
 }
 
 //---------------------------------------------------------------------------
@@ -2333,16 +1899,15 @@ BOOL FASTCALL Disk::Verify(const DWORD *cdb)
 //	READ TOC
 //
 //---------------------------------------------------------------------------
-int FASTCALL Disk::ReadToc(const DWORD *cdb, BYTE *buf)
+int Disk::ReadToc(const DWORD *cdb, BYTE *buf)
 {
-	ASSERT(this);
 	ASSERT(cdb);
 	ASSERT(cdb[0] == 0x43);
 	ASSERT(buf);
 
 	// This command is not supported
-	disk.code = DISK_INVALIDCMD;
-	return FALSE;
+	SetStatusCode(STATUS_INVALIDCMD);
+	return 0;
 }
 
 //---------------------------------------------------------------------------
@@ -2350,15 +1915,14 @@ int FASTCALL Disk::ReadToc(const DWORD *cdb, BYTE *buf)
 //	PLAY AUDIO
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL Disk::PlayAudio(const DWORD *cdb)
+bool Disk::PlayAudio(const DWORD *cdb)
 {
-	ASSERT(this);
 	ASSERT(cdb);
 	ASSERT(cdb[0] == 0x45);
 
 	// This command is not supported
-	disk.code = DISK_INVALIDCMD;
-	return FALSE;
+	SetStatusCode(STATUS_INVALIDCMD);
+	return false;
 }
 
 //---------------------------------------------------------------------------
@@ -2366,15 +1930,14 @@ BOOL FASTCALL Disk::PlayAudio(const DWORD *cdb)
 //	PLAY AUDIO MSF
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL Disk::PlayAudioMSF(const DWORD *cdb)
+bool Disk::PlayAudioMSF(const DWORD *cdb)
 {
-	ASSERT(this);
 	ASSERT(cdb);
 	ASSERT(cdb[0] == 0x47);
 
 	// This command is not supported
-	disk.code = DISK_INVALIDCMD;
-	return FALSE;
+	SetStatusCode(STATUS_INVALIDCMD);
+	return false;
 }
 
 //---------------------------------------------------------------------------
@@ -2382,14 +1945,32 @@ BOOL FASTCALL Disk::PlayAudioMSF(const DWORD *cdb)
 //	PLAY AUDIO TRACK
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL Disk::PlayAudioTrack(const DWORD *cdb)
+bool Disk::PlayAudioTrack(const DWORD *cdb)
 {
-	ASSERT(this);
 	ASSERT(cdb);
 	ASSERT(cdb[0] == 0x48);
 
 	// This command is not supported
-	disk.code = DISK_INVALIDCMD;
-	return FALSE;
+	SetStatusCode(STATUS_INVALIDCMD);
+	return false;
 }
 
+int Disk::GetSectorSize() const
+{
+	return disk.size;
+}
+
+void Disk::SetSectorSize(int size)
+{
+	disk.size = size;
+}
+
+DWORD Disk::GetBlockCount() const
+{
+	return disk.blocks;
+}
+
+void Disk::SetBlockCount(DWORD blocks)
+{
+	disk.blocks = blocks;
+}

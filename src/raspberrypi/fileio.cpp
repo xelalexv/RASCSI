@@ -19,7 +19,6 @@
 //
 //===========================================================================
 
-#ifndef BAREMETAL
 //---------------------------------------------------------------------------
 //
 //	コンストラクタ
@@ -49,9 +48,8 @@ Fileio::~Fileio()
 //	ロード
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL Fileio::Load(const Filepath& path, void *buffer, int size)
+BOOL Fileio::Load(const Filepath& path, void *buffer, int size)
 {
-	ASSERT(this);
 	ASSERT(buffer);
 	ASSERT(size > 0);
 	ASSERT(handle < 0);
@@ -78,9 +76,8 @@ BOOL FASTCALL Fileio::Load(const Filepath& path, void *buffer, int size)
 //	セーブ
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL Fileio::Save(const Filepath& path, void *buffer, int size)
+BOOL Fileio::Save(const Filepath& path, void *buffer, int size)
 {
-	ASSERT(this);
 	ASSERT(buffer);
 	ASSERT(size > 0);
 	ASSERT(handle < 0);
@@ -107,11 +104,10 @@ BOOL FASTCALL Fileio::Save(const Filepath& path, void *buffer, int size)
 //	オープン
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL Fileio::Open(LPCTSTR fname, OpenMode mode, BOOL directIO)
+BOOL Fileio::Open(LPCTSTR fname, OpenMode mode, BOOL directIO)
 {
 	mode_t omode;
 
-	ASSERT(this);
 	ASSERT(fname);
 	ASSERT(handle < 0);
 
@@ -145,11 +141,6 @@ BOOL FASTCALL Fileio::Open(LPCTSTR fname, OpenMode mode, BOOL directIO)
 			handle = open(fname, O_RDWR | omode);
 			break;
 
-		// アペンド
-		case Append:
-			handle = open(fname, O_CREAT | O_WRONLY | O_APPEND | omode, 0666);
-			break;
-
 		// それ以外
 		default:
 			ASSERT(FALSE);
@@ -170,9 +161,8 @@ BOOL FASTCALL Fileio::Open(LPCTSTR fname, OpenMode mode, BOOL directIO)
 //	オープン
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL Fileio::Open(LPCTSTR fname, OpenMode mode)
+BOOL Fileio::Open(LPCTSTR fname, OpenMode mode)
 {
-	ASSERT(this);
 
 	return Open(fname, mode, FALSE);
 }
@@ -182,9 +172,8 @@ BOOL FASTCALL Fileio::Open(LPCTSTR fname, OpenMode mode)
 //	オープン
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL Fileio::Open(const Filepath& path, OpenMode mode)
+BOOL Fileio::Open(const Filepath& path, OpenMode mode)
 {
-	ASSERT(this);
 
 	return Open(path.GetPath(), mode);
 }
@@ -194,9 +183,8 @@ BOOL FASTCALL Fileio::Open(const Filepath& path, OpenMode mode)
 //	オープン
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL Fileio::OpenDIO(LPCTSTR fname, OpenMode mode)
+BOOL Fileio::OpenDIO(LPCTSTR fname, OpenMode mode)
 {
-	ASSERT(this);
 
 	// O_DIRECT付きでオープン
 	if (!Open(fname, mode, TRUE)) {
@@ -212,9 +200,8 @@ BOOL FASTCALL Fileio::OpenDIO(LPCTSTR fname, OpenMode mode)
 //	オープン
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL Fileio::OpenDIO(const Filepath& path, OpenMode mode)
+BOOL Fileio::OpenDIO(const Filepath& path, OpenMode mode)
 {
-	ASSERT(this);
 
 	return OpenDIO(path.GetPath(), mode);
 }
@@ -224,11 +211,10 @@ BOOL FASTCALL Fileio::OpenDIO(const Filepath& path, OpenMode mode)
 //	読み込み
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL Fileio::Read(void *buffer, int size)
+BOOL Fileio::Read(void *buffer, int size)
 {
 	int count;
 
-	ASSERT(this);
 	ASSERT(buffer);
 	ASSERT(size > 0);
 	ASSERT(handle >= 0);
@@ -247,11 +233,10 @@ BOOL FASTCALL Fileio::Read(void *buffer, int size)
 //	書き込み
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL Fileio::Write(const void *buffer, int size)
+BOOL Fileio::Write(const void *buffer, int size)
 {
 	int count;
 
-	ASSERT(this);
 	ASSERT(buffer);
 	ASSERT(size > 0);
 	ASSERT(handle >= 0);
@@ -270,9 +255,8 @@ BOOL FASTCALL Fileio::Write(const void *buffer, int size)
 //	シーク
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL Fileio::Seek(off64_t offset, BOOL relative)
+BOOL Fileio::Seek(off_t offset, BOOL relative)
 {
-	ASSERT(this);
 	ASSERT(handle >= 0);
 	ASSERT(offset >= 0);
 
@@ -293,12 +277,11 @@ BOOL FASTCALL Fileio::Seek(off64_t offset, BOOL relative)
 //	ファイルサイズ取得
 //
 //---------------------------------------------------------------------------
-off64_t FASTCALL Fileio::GetFileSize()
+off_t Fileio::GetFileSize()
 {
-	off64_t cur;
-	off64_t end;
+	off_t cur;
+	off_t end;
 
-	ASSERT(this);
 	ASSERT(handle >= 0);
 
 	// ファイル位置を64bitで取得
@@ -318,11 +301,10 @@ off64_t FASTCALL Fileio::GetFileSize()
 //	ファイル位置取得
 //
 //---------------------------------------------------------------------------
-off64_t FASTCALL Fileio::GetFilePos() const
+off_t Fileio::GetFilePos() const
 {
-	off64_t pos;
+	off_t pos;
 
-	ASSERT(this);
 	ASSERT(handle >= 0);
 
 	// ファイル位置を64bitで取得
@@ -336,282 +318,11 @@ off64_t FASTCALL Fileio::GetFilePos() const
 //	クローズ
 //
 //---------------------------------------------------------------------------
-void FASTCALL Fileio::Close()
+void Fileio::Close()
 {
-	ASSERT(this);
 
 	if (handle != -1) {
 		close(handle);
 		handle = -1;
 	}
 }
-#else
-//---------------------------------------------------------------------------
-//
-//	コンストラクタ
-//
-//---------------------------------------------------------------------------
-Fileio::Fileio()
-{
-	// ワーク初期化
-	handle.obj.fs = 0;
-}
-
-//---------------------------------------------------------------------------
-//
-//	デストラクタ
-//
-//---------------------------------------------------------------------------
-Fileio::~Fileio()
-{
-	ASSERT(!handle.obj.fs);
-
-	// Releaseでの安全策
-	Close();
-}
-
-//---------------------------------------------------------------------------
-//
-//	ロード
-//
-//---------------------------------------------------------------------------
-BOOL FASTCALL Fileio::Load(const Filepath& path, void *buffer, int size)
-{
-	ASSERT(this);
-	ASSERT(buffer);
-	ASSERT(size > 0);
-	ASSERT(!handle.obj.fs);
-
-	// オープン
-	if (!Open(path, ReadOnly)) {
-		return FALSE;
-	}
-
-	// 読み込み
-	if (!Read(buffer, size)) {
-		Close();
-		return FALSE;
-	}
-
-	// クローズ
-	Close();
-
-	return TRUE;
-}
-
-//---------------------------------------------------------------------------
-//
-//	セーブ
-//
-//---------------------------------------------------------------------------
-BOOL FASTCALL Fileio::Save(const Filepath& path, void *buffer, int size)
-{
-	ASSERT(this);
-	ASSERT(buffer);
-	ASSERT(size > 0);
-	ASSERT(!handle.obj.fs);
-
-	// オープン
-	if (!Open(path, WriteOnly)) {
-		return FALSE;
-	}
-
-	// 書き込み
-	if (!Write(buffer, size)) {
-		Close();
-		return FALSE;
-	}
-
-	// クローズ
-	Close();
-
-	return TRUE;
-}
-
-//---------------------------------------------------------------------------
-//
-//	オープン
-//
-//---------------------------------------------------------------------------
-BOOL FASTCALL Fileio::Open(LPCTSTR fname, OpenMode mode)
-{
-	FRESULT fr;
-	Filepath fpath;
-	ASSERT(this);
-	ASSERT(fname);
-	ASSERT(!handle.obj.fs);
-
-	// ヌル文字列からの読み込みは必ず失敗させる
-	if (fname[0] == _T('\0')) {
-		return FALSE;
-	}
-
-	// モード別
-	switch (mode) {
-		// 読み込みのみ
-		case ReadOnly:
-			fr = f_open(&handle, fname, FA_READ);
-			break;
-
-		// 書き込みのみ
-		case WriteOnly:
-			fr = f_open(&handle, fname, FA_CREATE_ALWAYS | FA_WRITE);
-			break;
-
-		// 読み書き両方
-		case ReadWrite:
-			fr = f_open(&handle, fname, FA_READ | FA_WRITE);
-			break;
-
-		// アペンド
-		case Append:
-			fr = f_open(&handle, fname, FA_OPEN_APPEND | FA_WRITE);
-			break;
-
-		// それ以外
-		default:
-			fr = FR_NO_PATH;
-			ASSERT(FALSE);
-			break;
-	}
-
-	// 結果評価
-	if (fr != FR_OK) {
-		return FALSE;
-	}
-
-	// オープン成功
-	return TRUE;
-}
-
-//---------------------------------------------------------------------------
-//
-//	オープン
-//
-//---------------------------------------------------------------------------
-BOOL FASTCALL Fileio::Open(const Filepath& path, OpenMode mode)
-{
-	ASSERT(this);
-	ASSERT(!handle.obj.fs);
-
-	return Open(path.GetPath(), mode);
-}
-
-//---------------------------------------------------------------------------
-//
-//	読み込み
-//
-//---------------------------------------------------------------------------
-BOOL FASTCALL Fileio::Read(void *buffer, int size)
-{
-	FRESULT fr;
-	UINT count;
-
-	ASSERT(this);
-	ASSERT(buffer);
-	ASSERT(size > 0);
-	ASSERT(handle.obj.fs);
-
-	// 読み込み
-	fr = f_read(&handle, buffer, size, &count);
-	if (fr != FR_OK || count != (unsigned int)size) {
-		return FALSE;
-	}
-
-	return TRUE;
-}
-
-//---------------------------------------------------------------------------
-//
-//	書き込み
-//
-//---------------------------------------------------------------------------
-BOOL FASTCALL Fileio::Write(const void *buffer, int size)
-{
-	FRESULT fr;
-	UINT count;
-
-	ASSERT(this);
-	ASSERT(buffer);
-	ASSERT(size > 0);
-	ASSERT(handle.obj.fs);
-
-	// 書き込み
-	fr = f_write(&handle, buffer, size, &count);
-	if (fr != FR_OK || count != (unsigned int)size) {
-		return FALSE;
-	}
-
-	return TRUE;
-}
-
-//---------------------------------------------------------------------------
-//
-//	シーク
-//
-//---------------------------------------------------------------------------
-BOOL FASTCALL Fileio::Seek(off64_t offset, BOOL relative)
-{
-	FRESULT fr;
-
-	ASSERT(this);
-	ASSERT(offset >= 0);
-	ASSERT(handle.obj.fs);
-
-	// 相対シークならオフセットに現在値を追加
-	if (relative) {
-		offset += f_tell(&handle);
-	}
-
-    fr = f_lseek(&handle, offset);
-	if (fr != FR_OK) {
-		return FALSE;
-	}
-
-	if (f_tell(&handle) != (DWORD)offset) {
-		return FALSE;
-	}
-
-	return TRUE;
-}
-
-//---------------------------------------------------------------------------
-//
-//	ファイルサイズ取得
-//
-//---------------------------------------------------------------------------
-off64_t FASTCALL Fileio::GetFileSize()
-{
-	ASSERT(this);
-	ASSERT(handle.obj.fs);
-
-	return f_size(&handle);
-}
-
-//---------------------------------------------------------------------------
-//
-//	ファイル位置取得
-//
-//---------------------------------------------------------------------------
-off64_t FASTCALL Fileio::GetFilePos() const
-{
-	ASSERT(this);
-	ASSERT(handle.obj.fs);
-
-	return f_tell(&handle);
-}
-
-//---------------------------------------------------------------------------
-//
-//	クローズ
-//
-//---------------------------------------------------------------------------
-void FASTCALL Fileio::Close()
-{
-	ASSERT(this);
-
-	if (handle.obj.fs) {
-		f_close(&handle);
-	}
-}
-#endif	//BAREMETAL

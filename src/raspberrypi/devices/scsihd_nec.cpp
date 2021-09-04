@@ -16,6 +16,7 @@
 
 #include "scsihd_nec.h"
 #include "fileio.h"
+#include "exceptions.h"
 
 //===========================================================================
 //
@@ -30,7 +31,9 @@
 //---------------------------------------------------------------------------
 SCSIHD_NEC::SCSIHD_NEC() : SCSIHD()
 {
-	// ワーク初期化
+	SetVendor("NEC");
+
+	// Work initialization
 	cylinders = 0;
 	heads = 0;
 	sectors = 0;
@@ -41,7 +44,7 @@ SCSIHD_NEC::SCSIHD_NEC() : SCSIHD()
 
 //---------------------------------------------------------------------------
 //
-//	リトルエンディアンと想定したワードを取り出す
+//	Extract words that are supposed to be little endian
 //
 //---------------------------------------------------------------------------
 static inline WORD getWordLE(const BYTE *b)
@@ -51,7 +54,7 @@ static inline WORD getWordLE(const BYTE *b)
 
 //---------------------------------------------------------------------------
 //
-//	リトルエンディアンと想定したロングワードを取り出す
+//	Extract longwords assumed to be little endian
 //
 //---------------------------------------------------------------------------
 static inline DWORD getDwordLE(const BYTE *b)
@@ -62,55 +65,46 @@ static inline DWORD getDwordLE(const BYTE *b)
 
 //---------------------------------------------------------------------------
 //
-//	オープン
+//	Open
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL SCSIHD_NEC::Open(const Filepath& path, BOOL /*attn*/)
+void SCSIHD_NEC::Open(const Filepath& path, BOOL /*attn*/)
 {
-	Fileio fio;
-	off64_t size;
-	BYTE hdr[512];
-	LPCTSTR ext;
-
-	ASSERT(this);
-	ASSERT(!disk.ready);
+	ASSERT(!IsReady());
 
 	// Open as read-only
+	Fileio fio;
 	if (!fio.Open(path, Fileio::ReadOnly)) {
-		return FALSE;
+		throw io_exception("Can't open hard disk file read-only");
 	}
 
 	// Get file size
-	size = fio.GetFileSize();
+	off_t size = fio.GetFileSize();
 
-	// ヘッダー読み込み
-	if (size >= (off64_t)sizeof(hdr)) {
+	// Read header
+	BYTE hdr[512];
+	if (size >= (off_t)sizeof(hdr)) {
 		if (!fio.Read(hdr, sizeof(hdr))) {
 			fio.Close();
-			return FALSE;
+			throw io_exception("Can't read NEC hard disk file header");
 		}
 	}
 	fio.Close();
 
-	// 512バイト単位であること
+	// Must be in 512 byte units
 	if (size & 0x1ff) {
-		return FALSE;
+		throw io_exception("File size must be a multiple of 512 bytes");
 	}
 
-	// 10MB以上
-	if (size < 0x9f5400) {
-		return FALSE;
-	}
-	// xm6iに準じて2TB
-	// よく似たものが wxw/wxw_cfg.cpp にもある
+	// 2TB is the current maximum
 	if (size > 2LL * 1024 * 1024 * 1024 * 1024) {
-		return FALSE;
+		throw io_exception("File size must not exceed 2 TB");
 	}
 
-	// 拡張子別にパラメータを決定
-	ext = path.GetFileExt();
-	if (xstrcasecmp(ext, _T(".HDN")) == 0) {
-		// デフォルト設定としてセクタサイズ512,セクタ数25,ヘッド数8を想定
+	// Determine parameters by extension
+	LPCTSTR ext = path.GetFileExt();
+	if (strcasecmp(ext, _T(".HDN")) == 0) {
+		// Assuming sector size 512, number of sectors 25, number of heads 8 as default settings
 		imgoffset = 0;
 		imgsize = size;
 		sectorsize = 512;
@@ -119,48 +113,51 @@ BOOL FASTCALL SCSIHD_NEC::Open(const Filepath& path, BOOL /*attn*/)
 		cylinders = (int)(size >> 9);
 		cylinders >>= 3;
 		cylinders /= 25;
-	} else if (xstrcasecmp(ext, _T(".HDI")) == 0) { // Anex86 HD image?
+	} else if (strcasecmp(ext, _T(".HDI")) == 0) { // Anex86 HD image?
 		imgoffset = getDwordLE(&hdr[4 + 4]);
 		imgsize = getDwordLE(&hdr[4 + 4 + 4]);
 		sectorsize = getDwordLE(&hdr[4 + 4 + 4 + 4]);
 		sectors = getDwordLE(&hdr[4 + 4 + 4 + 4 + 4]);
 		heads = getDwordLE(&hdr[4 + 4 + 4 + 4 + 4 + 4]);
 		cylinders = getDwordLE(&hdr[4 + 4 + 4 + 4 + 4 + 4 + 4]);
-	} else if (xstrcasecmp(ext, _T(".NHD")) == 0 &&
+	} else if (strcasecmp(ext, _T(".NHD")) == 0 &&
 		memcmp(hdr, "T98HDDIMAGE.R0\0", 15) == 0) { // T98Next HD image?
 		imgoffset = getDwordLE(&hdr[0x10 + 0x100]);
 		cylinders = getDwordLE(&hdr[0x10 + 0x100 + 4]);
 		heads = getWordLE(&hdr[0x10 + 0x100 + 4 + 4]);
 		sectors = getWordLE(&hdr[0x10 + 0x100 + 4 + 4 + 2]);
 		sectorsize = getWordLE(&hdr[0x10 + 0x100 + 4 + 4 + 2 + 2]);
-		imgsize = (off64_t)cylinders * heads * sectors * sectorsize;
+		imgsize = (off_t)cylinders * heads * sectors * sectorsize;
 	}
 
-	// セクタサイズは256または512をサポート
+	// Supports 256 or 512 sector sizes
 	if (sectorsize != 256 && sectorsize != 512) {
-		return FALSE;
+		throw io_exception("Sector size must be 256 or 512 bytes");
 	}
 
-	// イメージサイズの整合性チェック
+	// Image size consistency check
 	if (imgoffset + imgsize > size || (imgsize % sectorsize != 0)) {
-		return FALSE;
+		throw io_exception("Image size consistency check failed");
 	}
 
-	// セクタサイズ
+	// Sector size
+	// TODO Do not use disk.size directly
 	for(disk.size = 16; disk.size > 0; --(disk.size)) {
 		if ((1 << disk.size) == sectorsize)
 			break;
 	}
 	if (disk.size <= 0 || disk.size > 16) {
-		return FALSE;
+		throw io_exception("Invalid disk size");
 	}
 
-	// ブロック数
-	disk.blocks = (DWORD)(imgsize >> disk.size);
+	// Number of blocks
+	SetBlockCount((DWORD)(imgsize >> disk.size));
 	disk.imgoffset = imgoffset;
 
-	// Call the base class
-	return Disk::Open(path);
+	LOGINFO("Media capacity for image file '%s': %d blocks", path.GetPath(), GetBlockCount());
+
+	Disk::Open(path);
+	FileSupport::SetPath(path);
 }
 
 //---------------------------------------------------------------------------
@@ -168,94 +165,71 @@ BOOL FASTCALL SCSIHD_NEC::Open(const Filepath& path, BOOL /*attn*/)
 //	INQUIRY
 //
 //---------------------------------------------------------------------------
-int FASTCALL SCSIHD_NEC::Inquiry(
-	const DWORD *cdb, BYTE *buf, DWORD major, DWORD minor)
+int SCSIHD_NEC::Inquiry(const DWORD *cdb, BYTE *buf)
 {
-	int size;
+	int size = SCSIHD::Inquiry(cdb, buf);
 
-	// 基底クラス
-	size = SCSIHD::Inquiry(cdb, buf, major, minor);
-
-	// 基底クラスでエラーなら終了
-	if (size == 0) {
-		return 0;
-	}
-
-	// SCSI1相当に変更
+	// This drive is a SCSI-1 SCCS drive
 	buf[2] = 0x01;
 	buf[3] = 0x01;
-
-	// Replace Vendor name
-	buf[8] = 'N';
-	buf[9] = 'E';
-	buf[10] = 'C';
 
 	return size;
 }
 
 //---------------------------------------------------------------------------
 //
-//	エラーページ追加
+//	Error page added
 //
 //---------------------------------------------------------------------------
-int FASTCALL SCSIHD_NEC::AddError(BOOL change, BYTE *buf)
+int SCSIHD_NEC::AddError(bool change, BYTE *buf)
 {
-	ASSERT(this);
 	ASSERT(buf);
 
 	// Set the message length
 	buf[0] = 0x01;
 	buf[1] = 0x06;
 
-	// No changeable area
-	if (change) {
-		return 8;
-	}
-
-	// リトライカウントは0、リミットタイムは装置内部のデフォルト値を使用
+	// The retry count is 0, and the limit time uses the default value inside the device.
 	return 8;
 }
 
 //---------------------------------------------------------------------------
 //
-//	フォーマットページ追加
+//	Format page added
 //
 //---------------------------------------------------------------------------
-int FASTCALL SCSIHD_NEC::AddFormat(BOOL change, BYTE *buf)
+int SCSIHD_NEC::AddFormat(bool change, BYTE *buf)
 {
-	int size;
-
-	ASSERT(this);
 	ASSERT(buf);
 
 	// Set the message length
 	buf[0] = 0x80 | 0x03;
 	buf[1] = 0x16;
 
-	// 物理セクタのバイト数は変更可能に見せる(実際には変更できないが)
+	// Make the number of bytes in the physical sector appear mutable (although it cannot actually be)
 	if (change) {
 		buf[0xc] = 0xff;
 		buf[0xd] = 0xff;
 		return 24;
 	}
 
-	if (disk.ready) {
-		// 1ゾーンのトラック数を設定(PC-9801-55はこの値を見ているようだ)
+	if (IsReady()) {
+		// Set the number of tracks in one zone (PC-9801-55 seems to see this value)
 		buf[0x2] = (BYTE)(heads >> 8);
 		buf[0x3] = (BYTE)heads;
 
-		// 1トラックのセクタ数を設定
+		// Set the number of sectors per track
 		buf[0xa] = (BYTE)(sectors >> 8);
 		buf[0xb] = (BYTE)sectors;
 
-		// 物理セクタのバイト数を設定
-		size = 1 << disk.size;
+		// Set the number of bytes in the physical sector
+		int size = 1 << disk.size;
 		buf[0xc] = (BYTE)(size >> 8);
 		buf[0xd] = (BYTE)size;
 	}
 
-	// リムーバブル属性を設定(昔の名残)
-	if (disk.removable) {
+	// Set removable attributes (remains of the old days)
+	if (IsRemovable()) {
 		buf[20] = 0x20;
 	}
 
@@ -264,12 +238,11 @@ int FASTCALL SCSIHD_NEC::AddFormat(BOOL change, BYTE *buf)
 
 //---------------------------------------------------------------------------
 //
-//	ドライブページ追加
+//	Drive page added
 //
 //---------------------------------------------------------------------------
-int FASTCALL SCSIHD_NEC::AddDrive(BOOL change, BYTE *buf)
+int SCSIHD_NEC::AddDrive(bool change, BYTE *buf)
 {
-	ASSERT(this);
 	ASSERT(buf);
 
 	// Set the message length
@@ -277,17 +250,13 @@ int FASTCALL SCSIHD_NEC::AddDrive(BOOL change, BYTE *buf)
 	buf[1] = 0x12;
 
 	// No changeable area
-	if (change) {
-		return 20;
-	}
-
-	if (disk.ready) {
-		// シリンダ数を設定
+	if (!change && IsReady()) {
+		// Set the number of cylinders
 		buf[0x2] = (BYTE)(cylinders >> 16);
 		buf[0x3] = (BYTE)(cylinders >> 8);
 		buf[0x4] = (BYTE)cylinders;
 
-		// ヘッド数を設定
+		// Set the number of heads
 		buf[0x5] = (BYTE)heads;
 	}
 

@@ -12,12 +12,13 @@
 //
 //---------------------------------------------------------------------------
 
+#include <sys/mman.h>
+
 #include "os.h"
 #include "xm6.h"
 #include "gpiobus.h"
 #include "log.h"
 
-#ifndef BAREMETAL
 #ifdef __linux__
 //---------------------------------------------------------------------------
 //
@@ -80,42 +81,6 @@ DWORD bcm_host_get_peripheral_address(void)
 	return address;
 }
 #endif	// __NetBSD__
-#endif	// BAREMETAL
-
-#ifdef BAREMETAL
-// IO base address
-extern uint32_t RPi_IO_Base_Addr;
-
-// Core frequency
-extern uint32_t RPi_Core_Freq;
-
-#ifdef USE_SEL_EVENT_ENABLE
-//---------------------------------------------------------------------------
-//
-//	Interrupt control function
-//
-//---------------------------------------------------------------------------
-extern "C" {
-extern uintptr_t setIrqFuncAddress (void(*ARMaddress)(void));
-extern void EnableInterrupts (void);
-extern void DisableInterrupts (void);
-extern void WaitForInterrupts (void);
-}
-
-//---------------------------------------------------------------------------
-//
-//	Interrupt handler
-//
-//---------------------------------------------------------------------------
-static GPIOBUS *self;
-extern "C"
-void IrqHandler()
-{
-	// Clear interrupt
-	self->ClearSelectEvent();
-}
-#endif	// USE_SEL_EVENT_ENABLE
-#endif	// BAREMETAL
 
 //---------------------------------------------------------------------------
 //
@@ -124,9 +89,17 @@ void IrqHandler()
 //---------------------------------------------------------------------------
 GPIOBUS::GPIOBUS()
 {
-#if defined(USE_SEL_EVENT_ENABLE) && defined(BAREMETAL)
-	self = this;
-#endif	// USE_SEL_EVENT_ENABLE && BAREMETAL
+	actmode = TARGET;
+	baseaddr = 0;
+	gicc = 0;
+	gicd = 0;
+	gpio = 0;
+	level = 0;
+	pads = 0;
+	irpctl = 0;
+	qa7regs = 0;
+	signals = 0;
+	rpitype = 0;
 }
 
 //---------------------------------------------------------------------------
@@ -143,7 +116,7 @@ GPIOBUS::~GPIOBUS()
 //	初期化
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL GPIOBUS::Init(mode_e mode)
+BOOL GPIOBUS::Init(mode_e mode)
 {
 #if defined(__x86_64__) || defined(__X86__)
 	// When we're running on x86, there is no hardware to talk to, so just return.
@@ -153,21 +126,14 @@ BOOL FASTCALL GPIOBUS::Init(mode_e mode)
 	int i;
 	int j;
 	int pullmode;
-#ifndef BAREMETAL
 	int fd;
 #ifdef USE_SEL_EVENT_ENABLE
 	struct epoll_event ev;
 #endif	// USE_SEL_EVENT_ENABLE
-#endif	// BAREMETAL
 
 	// Save operation mode
 	actmode = mode;
 
-#ifdef BAREMETAL
-	// Get the base address
-	baseaddr = RPi_IO_Base_Addr;
-	map = (void*)baseaddr;
-#else
 	// Get the base address
 	baseaddr = (DWORD)bcm_host_get_peripheral_address();
 
@@ -179,13 +145,13 @@ BOOL FASTCALL GPIOBUS::Init(mode_e mode)
 	}
 
 	// Map peripheral region memory
-	map = mmap(NULL, 0x1000100,
-		PROT_READ | PROT_WRITE, MAP_SHARED, fd, baseaddr);
+	map = mmap(NULL, 0x1000100, PROT_READ | PROT_WRITE, MAP_SHARED, fd, baseaddr);
 	if (map == MAP_FAILED) {
+        LOGERROR("Error: Unable to map memory");
 		close(fd);
 		return FALSE;
 	}
-#endif
+
 	// Determine the type of raspberry pi from the base address
 	if (baseaddr == 0xfe000000) {
 		rpitype = 4;
@@ -213,24 +179,10 @@ BOOL FASTCALL GPIOBUS::Init(mode_e mode)
 	irpctl = (DWORD *)map;
 	irpctl += IRPT_OFFSET / sizeof(DWORD);
 
-#ifndef BAREMETAL
 	// Quad-A7 control
 	qa7regs = (DWORD *)map;
 	qa7regs += QA7_OFFSET / sizeof(DWORD);
-#endif	// BAREMETAL
 
-#ifdef BAREMETAL
-	// Map GIC memory
-	if (rpitype == 4) {
-		map = (void*)ARM_GICD_BASE;
-		gicd = (DWORD *)map;
-		map = (void*)ARM_GICC_BASE;
-		gicc = (DWORD *)map;
-	} else {
-		gicd = NULL;
-		gicc = NULL;
-	}
-#else
 	// Map GIC memory
 	if (rpitype == 4) {
 		map = mmap(NULL, 8192,
@@ -247,7 +199,6 @@ BOOL FASTCALL GPIOBUS::Init(mode_e mode)
 		gicc = NULL;
 	}
 	close(fd);
-#endif	// BAREMETAL
 
 	// Set Drive Strength to 16mA
 	DrvConfig(7);
@@ -292,7 +243,6 @@ BOOL FASTCALL GPIOBUS::Init(mode_e mode)
 
 	// Initialize SEL signal interrupt
 #ifdef USE_SEL_EVENT_ENABLE
-#ifndef BAREMETAL
 	// GPIO chip open
 	fd = open("/dev/gpiochip0", 0);
 	if (fd == -1) {
@@ -375,7 +325,6 @@ BOOL FASTCALL GPIOBUS::Init(mode_e mode)
 		// Enable interrupts
 		irpctl[IRPT_ENB_IRQ_2] = (1 << (GPIO_IRQ % 32));
 	}
-#endif	// BAREMETAL
 #endif	// USE_SEL_EVENT_ENABLE
 
 	// Create work table
@@ -395,7 +344,7 @@ BOOL FASTCALL GPIOBUS::Init(mode_e mode)
 //	Cleanup
 //
 //---------------------------------------------------------------------------
-void FASTCALL GPIOBUS::Cleanup()
+void GPIOBUS::Cleanup()
 {
 #if defined(__x86_64__) || defined(__X86__)
 	return;
@@ -405,9 +354,7 @@ void FASTCALL GPIOBUS::Cleanup()
 
 	// Release SEL signal interrupt
 #ifdef USE_SEL_EVENT_ENABLE
-#ifndef BAREMETAL
 	close(selevreq.fd);
-#endif	// BAREMETAL
 #endif	// USE_SEL_EVENT_ENABLE
 
 	// Set control signals
@@ -439,7 +386,7 @@ void FASTCALL GPIOBUS::Cleanup()
 //	Reset
 //
 //---------------------------------------------------------------------------
-void FASTCALL GPIOBUS::Reset()
+void GPIOBUS::Reset()
 {
 #if defined(__x86_64__) || defined(__X86__)
 	return;
@@ -530,7 +477,7 @@ void FASTCALL GPIOBUS::Reset()
 //	ENB signal setting
 //
 //---------------------------------------------------------------------------
-void FASTCALL GPIOBUS::SetENB(BOOL ast)
+void GPIOBUS::SetENB(BOOL ast)
 {
 	PinSetSignal(PIN_ENB, ast ? ENB_ON : ENB_OFF);
 }
@@ -540,7 +487,7 @@ void FASTCALL GPIOBUS::SetENB(BOOL ast)
 //	Get BSY signal
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL GPIOBUS::GetBSY()
+bool GPIOBUS::GetBSY()
 {
 	return GetSignal(PIN_BSY);
 }
@@ -550,7 +497,7 @@ BOOL FASTCALL GPIOBUS::GetBSY()
 //	Set BSY signal
 //
 //---------------------------------------------------------------------------
-void FASTCALL GPIOBUS::SetBSY(BOOL ast)
+void GPIOBUS::SetBSY(bool ast)
 {
 	// Set BSY signal
 	SetSignal(PIN_BSY, ast);
@@ -589,7 +536,7 @@ void FASTCALL GPIOBUS::SetBSY(BOOL ast)
 //	Get SEL signal
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL GPIOBUS::GetSEL()
+BOOL GPIOBUS::GetSEL()
 {
 	return GetSignal(PIN_SEL);
 }
@@ -599,7 +546,7 @@ BOOL FASTCALL GPIOBUS::GetSEL()
 //	Set SEL signal
 //
 //---------------------------------------------------------------------------
-void FASTCALL GPIOBUS::SetSEL(BOOL ast)
+void GPIOBUS::SetSEL(BOOL ast)
 {
 	if (actmode == INITIATOR && ast) {
 		// Turn on ACTIVE signal
@@ -615,7 +562,7 @@ void FASTCALL GPIOBUS::SetSEL(BOOL ast)
 //	Get ATN signal
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL GPIOBUS::GetATN()
+BOOL GPIOBUS::GetATN()
 {
 	return GetSignal(PIN_ATN);
 }
@@ -625,7 +572,7 @@ BOOL FASTCALL GPIOBUS::GetATN()
 //	Get ATN signal
 //
 //---------------------------------------------------------------------------
-void FASTCALL GPIOBUS::SetATN(BOOL ast)
+void GPIOBUS::SetATN(BOOL ast)
 {
 	SetSignal(PIN_ATN, ast);
 }
@@ -635,7 +582,7 @@ void FASTCALL GPIOBUS::SetATN(BOOL ast)
 //	Get ACK signal
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL GPIOBUS::GetACK()
+BOOL GPIOBUS::GetACK()
 {
 	return GetSignal(PIN_ACK);
 }
@@ -645,7 +592,7 @@ BOOL FASTCALL GPIOBUS::GetACK()
 //	Set ACK signal
 //
 //---------------------------------------------------------------------------
-void FASTCALL GPIOBUS::SetACK(BOOL ast)
+void GPIOBUS::SetACK(BOOL ast)
 {
 	SetSignal(PIN_ACK, ast);
 }
@@ -655,7 +602,7 @@ void FASTCALL GPIOBUS::SetACK(BOOL ast)
 //	Get ACK signal
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL GPIOBUS::GetACT()
+BOOL GPIOBUS::GetACT()
 {
 	return GetSignal(PIN_ACT);
 }
@@ -665,7 +612,7 @@ BOOL FASTCALL GPIOBUS::GetACT()
 //	Set ACK signal
 //
 //---------------------------------------------------------------------------
-void FASTCALL GPIOBUS::SetACT(BOOL ast)
+void GPIOBUS::SetACT(BOOL ast)
 {
 	SetSignal(PIN_ACT, ast);
 }
@@ -675,7 +622,7 @@ void FASTCALL GPIOBUS::SetACT(BOOL ast)
 //	Get RST signal
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL GPIOBUS::GetRST()
+BOOL GPIOBUS::GetRST()
 {
 	return GetSignal(PIN_RST);
 }
@@ -685,7 +632,7 @@ BOOL FASTCALL GPIOBUS::GetRST()
 //	Set RST signal
 //
 //---------------------------------------------------------------------------
-void FASTCALL GPIOBUS::SetRST(BOOL ast)
+void GPIOBUS::SetRST(BOOL ast)
 {
 	SetSignal(PIN_RST, ast);
 }
@@ -695,7 +642,7 @@ void FASTCALL GPIOBUS::SetRST(BOOL ast)
 //	Get MSG signal
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL GPIOBUS::GetMSG()
+BOOL GPIOBUS::GetMSG()
 {
 	return GetSignal(PIN_MSG);
 }
@@ -705,7 +652,7 @@ BOOL FASTCALL GPIOBUS::GetMSG()
 //	Set MSG signal
 //
 //---------------------------------------------------------------------------
-void FASTCALL GPIOBUS::SetMSG(BOOL ast)
+void GPIOBUS::SetMSG(BOOL ast)
 {
 	SetSignal(PIN_MSG, ast);
 }
@@ -715,7 +662,7 @@ void FASTCALL GPIOBUS::SetMSG(BOOL ast)
 //	Get CD signal
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL GPIOBUS::GetCD()
+BOOL GPIOBUS::GetCD()
 {
 	return GetSignal(PIN_CD);
 }
@@ -725,7 +672,7 @@ BOOL FASTCALL GPIOBUS::GetCD()
 //	Set CD Signal
 //
 //---------------------------------------------------------------------------
-void FASTCALL GPIOBUS::SetCD(BOOL ast)
+void GPIOBUS::SetCD(BOOL ast)
 {
 	SetSignal(PIN_CD, ast);
 }
@@ -735,7 +682,7 @@ void FASTCALL GPIOBUS::SetCD(BOOL ast)
 //	Get IO Signal
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL GPIOBUS::GetIO()
+BOOL GPIOBUS::GetIO()
 {
 	BOOL ast;
 	ast = GetSignal(PIN_IO);
@@ -775,7 +722,7 @@ BOOL FASTCALL GPIOBUS::GetIO()
 //	Set IO signal
 //
 //---------------------------------------------------------------------------
-void FASTCALL GPIOBUS::SetIO(BOOL ast)
+void GPIOBUS::SetIO(BOOL ast)
 {
 	SetSignal(PIN_IO, ast);
 
@@ -813,7 +760,7 @@ void FASTCALL GPIOBUS::SetIO(BOOL ast)
 //	Get REQ signal
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL GPIOBUS::GetREQ()
+BOOL GPIOBUS::GetREQ()
 {
 	return GetSignal(PIN_REQ);
 }
@@ -823,7 +770,7 @@ BOOL FASTCALL GPIOBUS::GetREQ()
 //	Set REQ signal
 //
 //---------------------------------------------------------------------------
-void FASTCALL GPIOBUS::SetREQ(BOOL ast)
+void GPIOBUS::SetREQ(BOOL ast)
 {
 	SetSignal(PIN_REQ, ast);
 }
@@ -833,7 +780,7 @@ void FASTCALL GPIOBUS::SetREQ(BOOL ast)
 // Get data signals
 //
 //---------------------------------------------------------------------------
-BYTE FASTCALL GPIOBUS::GetDAT()
+BYTE GPIOBUS::GetDAT()
 {
 	DWORD data;
 
@@ -856,7 +803,7 @@ BYTE FASTCALL GPIOBUS::GetDAT()
 //	Set data signals
 //
 //---------------------------------------------------------------------------
-void FASTCALL GPIOBUS::SetDAT(BYTE dat)
+void GPIOBUS::SetDAT(BYTE dat)
 {
 	// Write to port
 #if SIGNAL_CONTROL_MODE == 0
@@ -896,7 +843,7 @@ void FASTCALL GPIOBUS::SetDAT(BYTE dat)
 //	Get data parity signal
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL GPIOBUS::GetDP()
+BOOL GPIOBUS::GetDP()
 {
 	return GetSignal(PIN_DP);
 }
@@ -906,7 +853,7 @@ BOOL FASTCALL GPIOBUS::GetDP()
 //	Receive command handshake
 //
 //---------------------------------------------------------------------------
-int FASTCALL GPIOBUS::CommandHandShake(BYTE *buf)
+int GPIOBUS::CommandHandShake(BYTE *buf)
 {
 	int i;
 	BOOL ret;
@@ -951,12 +898,7 @@ int FASTCALL GPIOBUS::CommandHandShake(BYTE *buf)
 		goto irq_enable_exit;
 	}
 
-	// Distinguise whether the command is 6 bytes or 10 bytes
-	if (*buf >= 0x20 && *buf <= 0x7D) {
-		count = 10;
-	} else {
-		count = 6;
-	}
+	count = GetCommandByteCount(*buf);
 
 	// Increment buffer pointer
 	buf++;
@@ -1007,7 +949,7 @@ irq_enable_exit:
 //	Data reception handshake
 //
 //---------------------------------------------------------------------------
-int FASTCALL GPIOBUS::ReceiveHandShake(BYTE *buf, int count)
+int GPIOBUS::ReceiveHandShake(BYTE *buf, int count)
 {
 	int i;
 	BOOL ret;
@@ -1109,7 +1051,7 @@ int FASTCALL GPIOBUS::ReceiveHandShake(BYTE *buf, int count)
 //	Data transmission handshake
 //
 //---------------------------------------------------------------------------
-int FASTCALL GPIOBUS::SendHandShake(BYTE *buf, int count, int delay_after_bytes)
+int GPIOBUS::SendHandShake(BYTE *buf, int count, int delay_after_bytes)
 {
 	int i;
 	BOOL ret;
@@ -1223,30 +1165,22 @@ int FASTCALL GPIOBUS::SendHandShake(BYTE *buf, int count, int delay_after_bytes)
 //	SEL signal event polling
 //
 //---------------------------------------------------------------------------
-int FASTCALL GPIOBUS::PollSelectEvent()
+int GPIOBUS::PollSelectEvent()
 {
 	// clear errno
 	errno = 0;
-
-#ifdef BAREMETAL
-	// Enable interrupts
-	EnableInterrupts();
-
-	// Wait for interrupts
-	WaitForInterrupts();
-
-	// Disable interrupts
-	DisableInterrupts();
-#else
 	struct epoll_event epev;
 	struct gpioevent_data gpev;
 
 	if (epoll_wait(epfd, &epev, 1, -1) <= 0) {
+                LOGWARN("%s epoll_wait failed", __PRETTY_FUNCTION__);
 		return -1;
 	}
 
-	(void)read(selevreq.fd, &gpev, sizeof(gpev));
-#endif	// BAREMETAL
+	if (read(selevreq.fd, &gpev, sizeof(gpev)) < 0) {
+            LOGWARN("%s read failed", __PRETTY_FUNCTION__);
+            return -1;
+        }
 
 	return 0;
 }
@@ -1256,23 +1190,8 @@ int FASTCALL GPIOBUS::PollSelectEvent()
 //	Cancel SEL signal event
 //
 //---------------------------------------------------------------------------
-void FASTCALL GPIOBUS::ClearSelectEvent()
+void GPIOBUS::ClearSelectEvent()
 {
-#ifdef BAREMETAL
-	DWORD irq;
-
-	// Clear event
-	gpio[GPIO_EDS_0] = 1 << PIN_SEL;
-
-	// Response to GIC
-	if (rpitype == 4) {
-		// IRQ number
-		irq = gicc[GICC_IAR] & 0x3FF;
-
-		// Interrupt response
-		gicc[GICC_EOIR] = irq;
-	}
-#endif	// BAREMETAL
 }
 #endif	// USE_SEL_EVENT_ENABLE
 
@@ -1294,7 +1213,7 @@ const int GPIOBUS::SignalTable[19] = {
 //	Create work table
 //
 //---------------------------------------------------------------------------
-void FASTCALL GPIOBUS::MakeTable(void)
+void GPIOBUS::MakeTable(void)
 {
 	const int pintbl[] = {
 		PIN_DT0, PIN_DT1, PIN_DT2, PIN_DT3, PIN_DT4,
@@ -1397,7 +1316,7 @@ void FASTCALL GPIOBUS::MakeTable(void)
 //	Control signal setting
 //
 //---------------------------------------------------------------------------
-void FASTCALL GPIOBUS::SetControl(int pin, BOOL ast)
+void GPIOBUS::SetControl(int pin, BOOL ast)
 {
 	PinSetSignal(pin, ast);
 }
@@ -1407,7 +1326,7 @@ void FASTCALL GPIOBUS::SetControl(int pin, BOOL ast)
 //	Input/output mode setting
 //
 //---------------------------------------------------------------------------
-void FASTCALL GPIOBUS::SetMode(int pin, int mode)
+void GPIOBUS::SetMode(int pin, int mode)
 {
 	int index;
 	int shift;
@@ -1435,7 +1354,7 @@ void FASTCALL GPIOBUS::SetMode(int pin, int mode)
 //	Get input signal value
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL GPIOBUS::GetSignal(int pin)
+BOOL GPIOBUS::GetSignal(int pin)
 {
 	return  (signals >> pin) & 1;
 }
@@ -1445,7 +1364,7 @@ BOOL FASTCALL GPIOBUS::GetSignal(int pin)
 //	Set output signal value
 //
 //---------------------------------------------------------------------------
-void FASTCALL GPIOBUS::SetSignal(int pin, BOOL ast)
+void GPIOBUS::SetSignal(int pin, BOOL ast)
 {
 #if SIGNAL_CONTROL_MODE == 0
 	int index;
@@ -1482,7 +1401,7 @@ void FASTCALL GPIOBUS::SetSignal(int pin, BOOL ast)
 //	Wait for signal change
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL GPIOBUS::WaitSignal(int pin, BOOL ast)
+BOOL GPIOBUS::WaitSignal(int pin, BOOL ast)
 {
 	DWORD now;
 	DWORD timeout;
@@ -1516,9 +1435,8 @@ BOOL FASTCALL GPIOBUS::WaitSignal(int pin, BOOL ast)
 //	Disable IRQ
 //
 //---------------------------------------------------------------------------
-void FASTCALL GPIOBUS::DisableIRQ()
+void GPIOBUS::DisableIRQ()
 {
-#ifndef BAREMETAL
 	if (rpitype == 4) {
 		// RPI4 is disabled by GICC
 		giccpmr = gicc[GICC_PMR];
@@ -1533,7 +1451,6 @@ void FASTCALL GPIOBUS::DisableIRQ()
 		irptenb = irpctl[IRPT_ENB_IRQ_1];
 		irpctl[IRPT_DIS_IRQ_1] = irptenb & 0xf;
 	}
-#endif	// BAREMETAL
 }
 
 //---------------------------------------------------------------------------
@@ -1541,9 +1458,8 @@ void FASTCALL GPIOBUS::DisableIRQ()
 //	Enable IRQ
 //
 //---------------------------------------------------------------------------
-void FASTCALL GPIOBUS::EnableIRQ()
+void GPIOBUS::EnableIRQ()
 {
-#ifndef BAREMETAL
 	if (rpitype == 4) {
 		// RPI4 enables interrupts via the GICC
 		gicc[GICC_PMR] = giccpmr;
@@ -1554,7 +1470,6 @@ void FASTCALL GPIOBUS::EnableIRQ()
 		// Restart the system timer interrupt with the interrupt controller
 		irpctl[IRPT_ENB_IRQ_1] = irptenb & 0xf;
 	}
-#endif	// BAREMETAL
 }
 
 //---------------------------------------------------------------------------
@@ -1562,7 +1477,7 @@ void FASTCALL GPIOBUS::EnableIRQ()
 //	Pin direction setting (input/output)
 //
 //---------------------------------------------------------------------------
-void FASTCALL GPIOBUS::PinConfig(int pin, int mode)
+void GPIOBUS::PinConfig(int pin, int mode)
 {
 	int index;
 	DWORD mask;
@@ -1582,7 +1497,7 @@ void FASTCALL GPIOBUS::PinConfig(int pin, int mode)
 //	Pin pull-up/pull-down setting
 //
 //---------------------------------------------------------------------------
-void FASTCALL GPIOBUS::PullConfig(int pin, int mode)
+void GPIOBUS::PullConfig(int pin, int mode)
 {
 	int shift;
 	DWORD bits;
@@ -1630,7 +1545,7 @@ void FASTCALL GPIOBUS::PullConfig(int pin, int mode)
 //	Set output pin
 //
 //---------------------------------------------------------------------------
-void FASTCALL GPIOBUS::PinSetSignal(int pin, BOOL ast)
+void GPIOBUS::PinSetSignal(int pin, BOOL ast)
 {
 	// Check for invalid pin
 	if (pin < 0) {
@@ -1649,7 +1564,7 @@ void FASTCALL GPIOBUS::PinSetSignal(int pin, BOOL ast)
 //	Set the signal drive strength
 //
 //---------------------------------------------------------------------------
-void FASTCALL GPIOBUS::DrvConfig(DWORD drive)
+void GPIOBUS::DrvConfig(DWORD drive)
 {
 	DWORD data;
 
@@ -1663,7 +1578,7 @@ void FASTCALL GPIOBUS::DrvConfig(DWORD drive)
 //	Generic Phase Acquisition (Doesn't read GPIO)
 //
 //---------------------------------------------------------------------------
-BUS::phase_t FASTCALL GPIOBUS::GetPhaseRaw(DWORD raw_data)
+BUS::phase_t GPIOBUS::GetPhaseRaw(DWORD raw_data)
 {
 	DWORD mci;
 
@@ -1689,6 +1604,26 @@ BUS::phase_t FASTCALL GPIOBUS::GetPhaseRaw(DWORD raw_data)
 	return GetPhase(mci);
 }
 
+//---------------------------------------------------------------------------
+//
+//	Get the number of bytes for a command
+//
+// TODO The command length should be determined based on the bytes transferred in the COMMAND phase
+//
+//---------------------------------------------------------------------------
+int GPIOBUS::GetCommandByteCount(BYTE opcode) {
+	if (opcode == 0x88 || opcode == 0x8A || opcode == 0x8F || opcode == 0x9E) {
+		return 16;
+	}
+	else if (opcode == 0xA0) {
+		return 12;
+	}
+	else if (opcode >= 0x20 && opcode <= 0x7D) {
+		return 10;
+	} else {
+		return 6;
+	}
+}
 
 //---------------------------------------------------------------------------
 //
@@ -1716,9 +1651,8 @@ volatile DWORD SysTimer::corefreq;
 //	Initialize the system timer
 //
 //---------------------------------------------------------------------------
-void FASTCALL SysTimer::Init(DWORD *syst, DWORD *armt)
+void SysTimer::Init(DWORD *syst, DWORD *armt)
 {
-#ifndef BAREMETAL
 	// RPI Mailbox property interface
 	// Get max clock rate
 	//  Tag: 0x00030004
@@ -1732,7 +1666,6 @@ void FASTCALL SysTimer::Init(DWORD *syst, DWORD *armt)
 	//  0x000000004: CORE
 	DWORD maxclock[32] = { 32, 0, 0x00030004, 8, 0, 4, 0, 0 };
 	int fd;
-#endif	// BAREMETAL
 
 	// Save the base address
 	systaddr = syst;
@@ -1742,9 +1675,6 @@ void FASTCALL SysTimer::Init(DWORD *syst, DWORD *armt)
 	armtaddr[ARMT_CTRL] = 0x00000282;
 
 	// Get the core frequency
-#ifdef BAREMETAL
-	corefreq = RPi_Core_Freq / 1000000;
-#else
 	corefreq = 0;
 	fd = open("/dev/vcio", O_RDONLY);
 	if (fd >= 0) {
@@ -1752,7 +1682,6 @@ void FASTCALL SysTimer::Init(DWORD *syst, DWORD *armt)
 		corefreq = maxclock[6] / 1000000;
 	}
 	close(fd);
-#endif	// BAREMETAL
 }
 
 //---------------------------------------------------------------------------
@@ -1760,7 +1689,7 @@ void FASTCALL SysTimer::Init(DWORD *syst, DWORD *armt)
 //	Get system timer low byte
 //
 //---------------------------------------------------------------------------
-DWORD FASTCALL SysTimer::GetTimerLow() {
+DWORD SysTimer::GetTimerLow() {
 	return systaddr[SYST_CLO];
 }
 
@@ -1769,7 +1698,7 @@ DWORD FASTCALL SysTimer::GetTimerLow() {
 //	Get system timer high byte
 //
 //---------------------------------------------------------------------------
-DWORD FASTCALL SysTimer::GetTimerHigh() {
+DWORD SysTimer::GetTimerHigh() {
 	return systaddr[SYST_CHI];
 }
 
@@ -1778,7 +1707,7 @@ DWORD FASTCALL SysTimer::GetTimerHigh() {
 //	Sleep in nanoseconds
 //
 //---------------------------------------------------------------------------
-void FASTCALL SysTimer::SleepNsec(DWORD nsec)
+void SysTimer::SleepNsec(DWORD nsec)
 {
 	DWORD diff;
 	DWORD start;
@@ -1808,7 +1737,7 @@ void FASTCALL SysTimer::SleepNsec(DWORD nsec)
 //	Sleep in microseconds
 //
 //---------------------------------------------------------------------------
-void FASTCALL SysTimer::SleepUsec(DWORD usec)
+void SysTimer::SleepUsec(DWORD usec)
 {
 	DWORD now;
 

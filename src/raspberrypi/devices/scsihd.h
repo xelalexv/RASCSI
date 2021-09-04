@@ -19,20 +19,25 @@
 #include "disk.h"
 #include "filepath.h"
 
+#define DEFAULT_PRODUCT "SCSI HD"
+
 //===========================================================================
 //
 //	SCSI Hard Disk
 //
 //===========================================================================
-class SCSIHD : public Disk
+class SCSIHD : public Disk, public FileSupport
 {
 public:
 	// Basic Functions
-	SCSIHD();								// Constructor
-	void FASTCALL Reset();							// Reset
-	BOOL FASTCALL Open(const Filepath& path, BOOL attn = TRUE);		// Open
+	SCSIHD(bool = false);					// Constructor
+	void Reset();							// Reset
+	void Open(const Filepath& path);		// Open
 
 	// commands
-	int FASTCALL Inquiry(const DWORD *cdb, BYTE *buf, DWORD major, DWORD minor);	// INQUIRY command
-	BOOL FASTCALL ModeSelect(const DWORD *cdb, const BYTE *buf, int length);	// MODE SELECT(6) command
+	int Inquiry(const DWORD *cdb, BYTE *buf) override;	// INQUIRY command
+	bool ModeSelect(const DWORD *cdb, const BYTE *buf, int length) override;	// MODE SELECT(6) command
+
+	// Internal processing
+	int AddVendor(int page, bool change, BYTE *buf) override;	// Add vendor special page
 };

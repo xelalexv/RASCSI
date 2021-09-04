@@ -16,7 +16,7 @@
 #include "sasihd.h"
 #include "xm6.h"
 #include "fileio.h"
-
+#include "exceptions.h"
 
 //===========================================================================
 //
@@ -29,105 +29,101 @@
 //	Constructor
 //
 //---------------------------------------------------------------------------
-SASIHD::SASIHD() : Disk()
+SASIHD::SASIHD() : Disk("SAHD")
 {
-	// SASI ハードディスク
-	disk.id = MAKEID('S', 'A', 'H', 'D');
+	SetProtectable(true);
 }
 
 //---------------------------------------------------------------------------
 //
-//	リセット
+//	Reset
 //
 //---------------------------------------------------------------------------
-void FASTCALL SASIHD::Reset()
+void SASIHD::Reset()
 {
-	// ロック状態解除、アテンション解除
-	disk.lock = FALSE;
-	disk.attn = FALSE;
+	// Unlock, clear attention
+	SetLocked(false);
+	SetAttn(false);
 
-	// Resetなし、コードをクリア
-	disk.reset = FALSE;
-	disk.code = 0x00;
+	// Reset, clear the code
+	SetReset(false);
+	SetStatusCode(STATUS_NOERROR);
 }
 
 //---------------------------------------------------------------------------
 //
-//	オープン
+//	Open
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL SASIHD::Open(const Filepath& path, BOOL /*attn*/)
+void SASIHD::Open(const Filepath& path)
 {
-	Fileio fio;
-	off64_t size;
-
-	ASSERT(this);
-	ASSERT(!disk.ready);
+	ASSERT(!IsReady());
 
 	// Open as read-only
+	Fileio fio;
 	if (!fio.Open(path, Fileio::ReadOnly)) {
-		return FALSE;
+		throw io_exception("Can't open hard disk file read-only");
 	}
 
 	// Get file size
-	size = fio.GetFileSize();
+	off_t size = fio.GetFileSize();
 	fio.Close();
 
 	#if defined(USE_MZ1F23_1024_SUPPORT)
-	// MZ-2500/MZ-2800用 MZ-1F23(SASI 20M/セクタサイズ1024)専用
+	// For MZ-2500 / MZ-2800 MZ-1F23 (SASI 20M / sector size 1024) only
 	// 20M(22437888 BS=1024 C=21912)
 	if (size == 0x1566000) {
-		// セクタサイズとブロック数
-		disk.size = 10;
-		disk.blocks = (DWORD)(size >> 10);
+		// Sector size and number of blocks
+		SetSectorSize(10);
+		SetBlockCount((DWORD)(size >> 10));
 
-		// Call the base class
-		return Disk::Open(path);
+		Disk::Open(path);
+		FileSupport::SetPath(path);
 	}
 	#endif	// USE_MZ1F23_1024_SUPPORT
 
 	#if defined(REMOVE_FIXED_SASIHD_SIZE)
-	// 256バイト単位であること
+	// Must be in 256-byte units
 	if (size & 0xff) {
-		return FALSE;
+		throw io_exception("File size must be a multiple of 256 bytes");
 	}
 
-	// 10MB以上
+	// 10MB or more
 	if (size < 0x9f5400) {
-		return FALSE;
+		throw io_exception("File size must be at least 10 MB");
 	}
 
-	// 512MB程度に制限しておく
+	// Limit to about 512MB
 	if (size > 512 * 1024 * 1024) {
-		return FALSE;
+		throw io_exception("File size must not exceed 512 MB");
 	}
 	#else
 	// 10MB, 20MB, 40MBのみ
 	switch (size) {
-		// 10MB(10441728 BS=256 C=40788)
+		// 10MB (10441728 BS=256 C=40788)
 		case 0x9f5400:
 			break;
 
-		// 20MB(20748288 BS=256 C=81048)
+		// 20MB (20748288 BS=256 C=81048)
 		case 0x13c9800:
 			break;
 
-		// 40MB(41496576 BS=256 C=162096)
+		// 40MB (41496576 BS=256 C=162096)
 		case 0x2793000:
 			break;
 
-		// Other(サポートしない)
+		// Other (Not supported )
 		default:
-			return FALSE;
+			throw io_exception("Unsupported file size");
 	}
 	#endif	// REMOVE_FIXED_SASIHD_SIZE
 
-	// セクタサイズとブロック数
-	disk.size = 8;
-	disk.blocks = (DWORD)(size >> 8);
+	// Sector size 256 bytes and number of blocks
+	SetSectorSize(8);
+	SetBlockCount((DWORD)(size >> 8));
 
 	// Call the base class
-	return Disk::Open(path);
+	Disk::Open(path);
 }
 
 //---------------------------------------------------------------------------
@@ -135,30 +131,24 @@ BOOL FASTCALL SASIHD::Open(const Filepath& path, BOOL /*attn*/)
 //	REQUEST SENSE
 //
 //---------------------------------------------------------------------------
-int FASTCALL SASIHD::RequestSense(const DWORD *cdb, BYTE *buf)
+int SASIHD::RequestSense(const DWORD *cdb, BYTE *buf)
 {
-	int size;
-
-	ASSERT(this);
 	ASSERT(cdb);
 	ASSERT(buf);
 
-	// サイズ決定
-	size = (int)cdb[4];
-	ASSERT((size >= 0) && (size < 0x100));
+	// Size decision
+	int size = (int)cdb[4];
+	ASSERT(size >= 0 && size < 0x100);
 
-	// サイズ0のときに4バイト転送する(Shugart Associates System Interface仕様)
+	// Transfer 4 bytes when size 0 (Shugart Associates System Interface specification)
 	if (size == 0) {
 		size = 4;
 	}
 
-	// SASIは非拡張フォーマットに固定
+	// SASI fixed to non-extended format
 	memset(buf, 0, size);
-	buf[0] = (BYTE)(disk.code >> 16);
-	buf[1] = (BYTE)(disk.lun << 5);
-
-	// コードをクリア
-	disk.code = 0x00;
+	buf[0] = (BYTE)(GetStatusCode() >> 16);
+	buf[1] = (BYTE)(GetLun() << 5);
 
 	return size;
 }

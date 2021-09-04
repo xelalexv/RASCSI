@@ -13,10 +13,6 @@
 
 #include "filepath.h"
 
-#ifdef BAREMETAL
-#include "ff.h"
-#endif	// BAREMETAL
-
 //===========================================================================
 //
 //	マクロ(Load,Save用)
@@ -43,8 +39,7 @@ public:
 	enum OpenMode {
 		ReadOnly,						// 読み込みのみ
 		WriteOnly,						// 書き込みのみ
-		ReadWrite,						// 読み書き両方
-		Append							// アペンド
+		ReadWrite						// 読み書き両方
 	};
 
 public:
@@ -52,49 +47,39 @@ public:
 										// コンストラクタ
 	virtual ~Fileio();
 										// デストラクタ
-	BOOL FASTCALL Load(const Filepath& path, void *buffer, int size);
+	BOOL Load(const Filepath& path, void *buffer, int size);
 										// ROM,RAMロード
-	BOOL FASTCALL Save(const Filepath& path, void *buffer, int size);
+	BOOL Save(const Filepath& path, void *buffer, int size);
 										// RAMセーブ
 
-	BOOL FASTCALL Open(LPCTSTR fname, OpenMode mode);
+	BOOL Open(LPCTSTR fname, OpenMode mode);
 										// オープン
-	BOOL FASTCALL Open(const Filepath& path, OpenMode mode);
+	BOOL Open(const Filepath& path, OpenMode mode);
 										// オープン
-#ifndef BAREMETAL
-	BOOL FASTCALL OpenDIO(LPCTSTR fname, OpenMode mode);
+	BOOL OpenDIO(LPCTSTR fname, OpenMode mode);
 										// オープン
-	BOOL FASTCALL OpenDIO(const Filepath& path, OpenMode mode);
+	BOOL OpenDIO(const Filepath& path, OpenMode mode);
 										// オープン
-#endif	// BAREMETAL
-	BOOL FASTCALL Seek(off64_t offset, BOOL relative = FALSE);
+	BOOL Seek(off_t offset, BOOL relative = FALSE);
 										// シーク
-	BOOL FASTCALL Read(void *buffer, int size);
+	BOOL Read(void *buffer, int size);
 										// 読み込み
-	BOOL FASTCALL Write(const void *buffer, int size);
+	BOOL Write(const void *buffer, int size);
 										// 書き込み
-	off64_t FASTCALL GetFileSize();
+	off_t GetFileSize();
 										// ファイルサイズ取得
-	off64_t FASTCALL GetFilePos() const;
+	off_t GetFilePos() const;
 										// ファイル位置取得
-	void FASTCALL Close();
+	void Close();
 										// クローズ
-#ifndef BAREMETAL
-	BOOL FASTCALL IsValid() const		{ return (BOOL)(handle != -1); }
-#else
-	BOOL FASTCALL IsValid() const		{ return (BOOL)(handle.obj.fs != 0); }
-#endif	// BAREMETAL
+	BOOL IsValid() const		{ return (BOOL)(handle != -1); }
 										// 有効チェック
 
 private:
-#ifndef BAREMETAL
-	BOOL FASTCALL Open(LPCTSTR fname, OpenMode mode, BOOL directIO);
+	BOOL Open(LPCTSTR fname, OpenMode mode, BOOL directIO);
 										// オープン
 
 	int handle;							// ファイルハンドル
-#else
-	FIL handle;							// ファイルハンドル
-#endif	// BAREMETAL
 };
 
 #endif	// fileio_h

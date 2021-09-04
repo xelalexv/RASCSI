@@ -28,6 +28,7 @@
 //---------------------------------------------------------------------------
 
 #include "scsi_daynaport.h"
+#include <sstream>
 
 //===========================================================================
 //
@@ -47,13 +48,14 @@ const BYTE SCSIDaynaPort::m_apple_talk_addr[6] = { 0x09, 0x00, 0x07, 0xff, 0xff,
 //	Constructor
 //
 //---------------------------------------------------------------------------
-SCSIDaynaPort::SCSIDaynaPort() : Disk()
+SCSIDaynaPort::SCSIDaynaPort() : Disk("SCDP")
 {
-	LOGTRACE("SCSI DaynaPort Constructor");
-	// DaynaPort
-	disk.id = MAKEID('S', 'C', 'D', 'P');
-	
-#if defined(__linux__) && !defined(BAREMETAL)
+	SetRemovable(false);
+
+	SetVendor("Dayna");
+	SetProduct("SCSI/Link");
+
+	#ifdef __linux__
 	// TAP Driver Generation
 	m_tap = new CTapDriver();
 	m_bTapEnable = m_tap->Init();
@@ -65,8 +67,8 @@ SCSIDaynaPort::SCSIDaynaPort() : Disk()
 
 	LOGTRACE("%s this->reset()", __PRETTY_FUNCTION__);
 	this->Reset();
-	disk.ready = true;
-	disk.reset = false;
+	SetReady(true);
+	SetReset(false);
 
 	// Generate MAC Address
 	LOGTRACE("%s memset(m_mac_addr, 0x00, 6);", __PRETTY_FUNCTION__);
@@ -86,7 +88,7 @@ SCSIDaynaPort::SCSIDaynaPort() : Disk()
 	m_mac_addr[4]=0x98;
 	m_mac_addr[5]=0xE3;
 
-#endif	// RASCSI && !BAREMETAL
+#endif	// linux
 	LOGTRACE("SCSIDaynaPort Constructor End");
 
 }
@@ -106,10 +108,10 @@ SCSIDaynaPort::~SCSIDaynaPort()
 	}
 }
 
-BOOL FASTCALL SCSIDaynaPort::Open(const Filepath& path, BOOL attn)
+ void SCSIDaynaPort::Open(const Filepath& path, BOOL attn)
 {
 	LOGTRACE("SCSIDaynaPort Open");
-	return m_tap->OpenDump(path);
+	m_tap->OpenDump(path);
 }
 
 //---------------------------------------------------------------------------
@@ -117,73 +119,44 @@ BOOL FASTCALL SCSIDaynaPort::Open(const Filepath& path, BOOL attn)
 //	INQUIRY
 //
 //---------------------------------------------------------------------------
-int FASTCALL SCSIDaynaPort::Inquiry(
-	const DWORD *cdb, BYTE *buffer, DWORD major, DWORD minor)
+int SCSIDaynaPort::Inquiry(const DWORD *cdb, BYTE *buffer)
 {
-	DWORD allocation_length;
 	// scsi_cdb_6_byte_t command;
 	// memcpy(&command,cdb,sizeof(command));
 
-	ASSERT(this);
 	ASSERT(cdb);
 	ASSERT(buffer);
-	ASSERT(cdb[0] == 0x12);
 
 	//allocation_length = command->length;
-	allocation_length = cdb[4] + (((DWORD)cdb[3]) << 8);
+	DWORD allocation_length = cdb[4] + (((DWORD)cdb[3]) << 8);
 	// if(allocation_length != command.length){
 	// 	LOGDEBUG("%s CDB: %02X %02X %02X %02X %02X %02X", __PRETTY_FUNCTION__, (unsigned int)cdb[0], (unsigned int)cdb[1], (unsigned int)cdb[2], (unsigned int)cdb[3], (unsigned int)cdb[4], (unsigned int)cdb[5] );
 	// 	LOGWARN(":::::::::: Expected allocation length %04X but found %04X", (unsigned int)allocation_length, (unsigned int)command.length);
 	// 	LOGWARN(":::::::::: Doing runtime pointer conversion: %04X", ((scsi_cdb_6_byte_t*)cdb)->length);
 	// }
 
-	LOGTRACE("%s Inquiry with major %ld, minor %ld. Allocaiton length: %d",__PRETTY_FUNCTION__, major, minor, (int)allocation_length);
+	LOGTRACE("%s Inquiry, allocation length: %d",__PRETTY_FUNCTION__, (int)allocation_length);
 
-	if(cdb[1] & 0x3) {
-		LOGWARN("Tiny SCSI Emulator says this is an invalid request");
+	if (allocation_length > 4){
+		if (allocation_length > sizeof(m_daynaport_inquiry_response)) {
+			allocation_length = sizeof(m_daynaport_inquiry_response);
+		}
+
+		// Copy the pre-canned response
+		memcpy(buffer, m_daynaport_inquiry_response, allocation_length);
+
+		// Padded vendor, product, revision
+		memcpy(&buffer[8], GetPaddedName().c_str(), 28);
 	}
 
-	if(allocation_length > 4){
-		// Copy the pre-canned response
-		memcpy(buffer, m_target_ethernet_inquiry_response, allocation_length);
-		// Set the size
-		//buffer[4] = (BYTE)((allocation_length - 7) & 0xFF);
-		// The inquiry response format only allows for a 1 byte 'additional size' field
-		if(allocation_length > 0xFF){
-			LOGWARN("%s The inquiry format only allows for a maximum of %d (0xFF + 4) bytes",\
-				__PRETTY_FUNCTION__, (int)0xFF + 4)
-		}
+	// SCSI-2 p.104 4.4.3 Incorrect logical unit handling
+	if ((cdb[1] >> 5) & 0x07) {
+		buffer[0] |= 0x7f;
 	}
 
 	LOGTRACE("response size is %d", (int)allocation_length);
 
-	// Success
-	disk.code = DISK_NOERROR;
 	return allocation_length;
-}
-
-//---------------------------------------------------------------------------
-//
-//	RequestSense
-//
-//---------------------------------------------------------------------------
-int FASTCALL SCSIDaynaPort::RequestSense(const DWORD *cdb, BYTE *buffer)
-{
-	// The DaynaPort RequestSense response will always be 9 bytes.
-	int size = 9;
-
-	LOGTRACE("%s size of sense data = %d", __PRETTY_FUNCTION__, size);
-
-	// Clear the buffer
-	memset(buffer, 0, size);
-
-	// Only set the response code (70h)
-	buffer[0] = 0x70;
-
-	// Clear the code
-	disk.code = 0x00;
-
-	return size;
 }
 
 //---------------------------------------------------------------------------
@@ -191,7 +164,7 @@ int FASTCALL SCSIDaynaPort::RequestSense(const DWORD *cdb, BYTE *buffer)
 //	READ
 //
 //---------------------------------------------------------------------------
-int FASTCALL SCSIDaynaPort::Read(const DWORD *cdb, BYTE *buf, DWORD block)
+int SCSIDaynaPort::Read(const DWORD *cdb, BYTE *buf, DWORD block)
 {
 	WORD requested_length = 0;
 	int rx_packet_size = 0;
@@ -200,10 +173,11 @@ int FASTCALL SCSIDaynaPort::Read(const DWORD *cdb, BYTE *buf, DWORD block)
 	scsi_cmd_read_6_t *command = (scsi_cmd_read_6_t*)cdb;
 	int read_count = 0;
 
-	ASSERT(this);
 	ASSERT(buf);
 
-	LOGTRACE("%s reading DaynaPort block %lu", __PRETTY_FUNCTION__, block);
+	ostringstream s;
+	s << __PRETTY_FUNCTION__ << " reading DaynaPort block " << block;
+	LOGTRACE("%s", s.str().c_str());
 
 	if(command->operation_code != 0x08){
 		LOGERROR("Received unexpected cdb command: %02X. Expected 0x08", (unsigned int)command->operation_code);
@@ -328,9 +302,11 @@ int FASTCALL SCSIDaynaPort::Read(const DWORD *cdb, BYTE *buf, DWORD block)
 // WRITE check
 //
 //---------------------------------------------------------------------------
-int FASTCALL SCSIDaynaPort::WriteCheck(DWORD block)
+int SCSIDaynaPort::WriteCheck(DWORD block)
 {
-	LOGTRACE("%s block: %lu", __PRETTY_FUNCTION__, block);
+	ostringstream s;
+	s << __PRETTY_FUNCTION__ << " block: " << block;
+	LOGTRACE("%s", s.str().c_str());
 
 	// Status check
 	if (!CheckReady()) {
@@ -338,7 +314,7 @@ int FASTCALL SCSIDaynaPort::WriteCheck(DWORD block)
 	}
 
 	if(!m_bTapEnable){
-		disk.code = DISK_NOTREADY;
+		SetStatusCode(STATUS_NOTREADY);
 		return 0;
 	}
 
@@ -346,13 +322,12 @@ int FASTCALL SCSIDaynaPort::WriteCheck(DWORD block)
 	return 1;
 }
 	
-
 //---------------------------------------------------------------------------
 //
 //  Write
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL SCSIDaynaPort::Write(const DWORD *cdb, const BYTE *buf, DWORD block)
+bool SCSIDaynaPort::Write(const DWORD *cdb, const BYTE *buf, DWORD block)
 {
 	BYTE data_format;
 	WORD data_length;
@@ -373,22 +348,21 @@ BOOL FASTCALL SCSIDaynaPort::Write(const DWORD *cdb, const BYTE *buf, DWORD bloc
 	if(data_format == 0x00){
 		m_tap->Tx(buf, data_length);
 		LOGTRACE("%s Transmitted %u bytes (00 format)", __PRETTY_FUNCTION__, data_length);
-		return TRUE;
+		return true;
 	}
 	else if (data_format == 0x80){
 		// The data length is actuall specified in the first 2 bytes of the payload
 		data_length=(WORD)buf[1] + ((WORD)buf[0] << 8);
 		m_tap->Tx(&buf[4], data_length);
 		LOGTRACE("%s Transmitted %u bytes (80 format)", __PRETTY_FUNCTION__, data_length);
-		return TRUE;
+		return true;
 	}
 	else
 	{
 		// LOGWARN("%s Unknown data format %02X", __PRETTY_FUNCTION__, (unsigned int)command->format);
 		LOGWARN("%s Unknown data format %02X", __PRETTY_FUNCTION__, (unsigned int)data_format);
-		return FALSE;
+		return true;
 	}
-
 }
 	
 
@@ -397,7 +371,7 @@ BOOL FASTCALL SCSIDaynaPort::Write(const DWORD *cdb, const BYTE *buf, DWORD bloc
 //	RetrieveStats
 //
 //---------------------------------------------------------------------------
-int FASTCALL SCSIDaynaPort::RetrieveStats(const DWORD *cdb, BYTE *buffer)
+int SCSIDaynaPort::RetrieveStats(const DWORD *cdb, BYTE *buffer)
 {
 	DWORD response_size;
 	DWORD allocation_length;
@@ -408,7 +382,6 @@ int FASTCALL SCSIDaynaPort::RetrieveStats(const DWORD *cdb, BYTE *buffer)
 
 	LOGTRACE("%s RetrieveStats ", __PRETTY_FUNCTION__);
 
-	ASSERT(this);
 	ASSERT(cdb);
 	ASSERT(buffer);
 
@@ -446,7 +419,6 @@ int FASTCALL SCSIDaynaPort::RetrieveStats(const DWORD *cdb, BYTE *buffer)
 
 	response_size = 18;
 
-
 	response_size = sizeof(m_scsi_link_stats);
 	memcpy(buffer, &m_scsi_link_stats, sizeof(m_scsi_link_stats));
 
@@ -459,7 +431,6 @@ int FASTCALL SCSIDaynaPort::RetrieveStats(const DWORD *cdb, BYTE *buffer)
 	}
 
 	//  Success
-	disk.code = DISK_NOERROR;
 	return response_size;
 	// scsi_cdb_6_byte_t *command = (scsi_cdb_6_byte_t*)cdb;
 	// scsi_resp_link_stats_t *response = (scsi_resp_link_stats_t*) buffer;
@@ -483,17 +454,12 @@ int FASTCALL SCSIDaynaPort::RetrieveStats(const DWORD *cdb, BYTE *buffer)
 //	Enable or Disable the interface
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL SCSIDaynaPort::EnableInterface(const DWORD *cdb)
+bool SCSIDaynaPort::EnableInterface(const DWORD *cdb)
 {
-	int result;
-	// scsi_cdb_6_byte_t *command = (scsi_cdb_6_byte_t*)cdb;
-
-	// if(command->control & 0x80)
-	if(cdb[5] & 0x80)
-
-	{
+	bool result;
+	if (cdb[5] & 0x80) {
 		result = m_tap->Enable();
-		if(result){
+		if (result) {
 			LOGINFO("The DaynaPort interface has been ENABLED.");
 		}
 		else{
@@ -501,10 +467,9 @@ BOOL FASTCALL SCSIDaynaPort::EnableInterface(const DWORD *cdb)
 		}
 		m_tap->Flush();
 	}
-	else
-	{
+	else {
 		result = m_tap->Disable();
-		if(result){
+		if (result) {
 			LOGINFO("The DaynaPort interface has been DISABLED.");
 		}
 		else{
@@ -512,7 +477,7 @@ BOOL FASTCALL SCSIDaynaPort::EnableInterface(const DWORD *cdb)
 		}
 	}
 
-	return TRUE;
+	return result;
 }
 
 //---------------------------------------------------------------------------
@@ -520,14 +485,12 @@ BOOL FASTCALL SCSIDaynaPort::EnableInterface(const DWORD *cdb)
 //	TEST UNIT READY
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL SCSIDaynaPort::TestUnitReady(const DWORD* /*cdb*/)
+bool SCSIDaynaPort::TestUnitReady(const DWORD* /*cdb*/)
 {
-	ASSERT(this);
 	LOGTRACE("%s", __PRETTY_FUNCTION__);
 
 	// TEST UNIT READY Success
-	disk.code = DISK_NOERROR;
-	return TRUE;
+	return true;
 }
 
 //---------------------------------------------------------------------------
@@ -535,13 +498,13 @@ BOOL FASTCALL SCSIDaynaPort::TestUnitReady(const DWORD* /*cdb*/)
 //	Set Mode - enable broadcast messages
 //
 //---------------------------------------------------------------------------
-void FASTCALL SCSIDaynaPort::SetMode(const DWORD *cdb, BYTE *buffer)
+void SCSIDaynaPort::SetMode(const DWORD *cdb, BYTE *buffer)
 {
 	LOGTRACE("%s Setting mode", __PRETTY_FUNCTION__);
 
 	for(size_t i=0; i<sizeof(6); i++)
 	{
-		LOGTRACE("%s %d: %02X",__PRETTY_FUNCTION__, i,(WORD)cdb[i]);
+		LOGTRACE("%s %d: %02X",__PRETTY_FUNCTION__, (unsigned int)i,(WORD)cdb[i]);
 	}	
 }
 

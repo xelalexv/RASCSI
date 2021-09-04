@@ -24,7 +24,7 @@
 #include "xm6.h"
 #include "ctapdriver.h"
 #include "log.h"
-
+#include "exceptions.h"
 
 //---------------------------------------------------------------------------
 //
@@ -35,6 +35,7 @@ CTapDriver::CTapDriver()
 {
 	LOGTRACE("%s",__PRETTY_FUNCTION__);
 	// Initialization
+	m_bTxValid = FALSE;
 	m_hTAP = -1;
 	memset(&m_MacAddr, 0, sizeof(m_MacAddr));
 	m_pcap = NULL;
@@ -65,9 +66,8 @@ static BOOL br_setif(int br_socket_fd, const char* bridgename, const char* ifnam
 
 static BOOL ip_link(int fd, const char* ifname, BOOL up) {
 	struct ifreq ifr;
-	int err;
 	strncpy(ifr.ifr_name, ifname, IFNAMSIZ-1); // Need to save room for null terminator
-	err = ioctl(fd, SIOCGIFFLAGS, &ifr);
+	int err = ioctl(fd, SIOCGIFFLAGS, &ifr);
 	if (err) {
 		LOGERROR("Error: can't ioctl SIOCGIFFLAGS. Errno: %d %s", errno, strerror(errno));
 		return FALSE;
@@ -84,15 +84,13 @@ static BOOL ip_link(int fd, const char* ifname, BOOL up) {
 	return TRUE;
 }
 
-BOOL FASTCALL CTapDriver::Init()
+BOOL CTapDriver::Init()
 {
 	LOGTRACE("%s",__PRETTY_FUNCTION__);
 
 	char dev[IFNAMSIZ] = "ras0";
 	struct ifreq ifr;
 	int ret;
-
-	ASSERT(this);
 
 	LOGTRACE("Opening Tap device");
 	// TAP device initilization
@@ -203,13 +201,11 @@ BOOL FASTCALL CTapDriver::Init()
 #endif // __linux__
 
 #ifdef __NetBSD__
-BOOL FASTCALL CTapDriver::Init()
+BOOL CTapDriver::Init()
 {
 	struct ifreq ifr;
 	struct ifaddrs *ifa, *a;
 	
-	ASSERT(this);
-
 	// TAP Device Initialization
 	if ((m_hTAP = open("/dev/tap", O_RDWR)) < 0) {
 		LOGERROR("Error: can't open tap. Errno: %d %s", errno, strerror(errno));
@@ -250,7 +246,7 @@ BOOL FASTCALL CTapDriver::Init()
 }
 #endif // __NetBSD__
 
-BOOL FASTCALL CTapDriver::OpenDump(const Filepath& path) {
+void CTapDriver::OpenDump(const Filepath& path) {
 	if (m_pcap == NULL) {
 		m_pcap = pcap_open_dead(DLT_EN10MB, 65535);
 	}
@@ -260,10 +256,10 @@ BOOL FASTCALL CTapDriver::OpenDump(const Filepath& path) {
 	m_pcap_dumper = pcap_dump_open(m_pcap, path.GetPath());
 	if (m_pcap_dumper == NULL) {
 		LOGERROR("Error: can't open pcap file: %s", pcap_geterr(m_pcap));
-		return FALSE;
+		throw io_exception("Can't open pcap file");
 	}
+
 	LOGTRACE("%s Opened %s for dumping", __PRETTY_FUNCTION__, path.GetPath());
-	return TRUE;
 }
 
 //---------------------------------------------------------------------------
@@ -271,10 +267,8 @@ BOOL FASTCALL CTapDriver::OpenDump(const Filepath& path) {
 //	Cleanup
 //
 //---------------------------------------------------------------------------
-void FASTCALL CTapDriver::Cleanup()
+void CTapDriver::Cleanup()
 {
-	ASSERT(this);
-
 	int br_socket_fd = -1;
 	if ((br_socket_fd = socket(AF_LOCAL, SOCK_STREAM, 0)) < 0) {
 		LOGERROR("Error: can't open bridge socket. Errno: %d %s", errno, strerror(errno));
@@ -307,10 +301,10 @@ void FASTCALL CTapDriver::Cleanup()
 //	Enable
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL CTapDriver::Enable(){
+bool CTapDriver::Enable(){
 	int fd = socket(PF_INET, SOCK_DGRAM, 0);
 	LOGDEBUG("%s: ip link set ras0 up", __PRETTY_FUNCTION__);
-	BOOL result = ip_link(fd, "ras0", TRUE);
+	bool result = ip_link(fd, "ras0", TRUE);
 	close(fd);
 	return result;
 }
@@ -320,10 +314,10 @@ BOOL FASTCALL CTapDriver::Enable(){
 //	Disable
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL CTapDriver::Disable(){
+bool CTapDriver::Disable(){
 	int fd = socket(PF_INET, SOCK_DGRAM, 0);
 	LOGDEBUG("%s: ip link set ras0 down", __PRETTY_FUNCTION__);
-	BOOL result = ip_link(fd, "ras0", FALSE);
+	bool result = ip_link(fd, "ras0", FALSE);
 	close(fd);
 	return result;
 }
@@ -333,7 +327,7 @@ BOOL FASTCALL CTapDriver::Disable(){
 //	Flush
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL CTapDriver::Flush(){
+BOOL CTapDriver::Flush(){
 	LOGTRACE("%s", __PRETTY_FUNCTION__);
 	while(PendingPackets()){
 		(void)Rx(m_garbage_buffer);
@@ -346,9 +340,8 @@ BOOL FASTCALL CTapDriver::Flush(){
 //	MGet MAC Address
 //
 //---------------------------------------------------------------------------
-void FASTCALL CTapDriver::GetMacAddr(BYTE *mac)
+void CTapDriver::GetMacAddr(BYTE *mac)
 {
-	ASSERT(this);
 	ASSERT(mac);
 
 	memcpy(mac, m_MacAddr, sizeof(m_MacAddr));
@@ -359,11 +352,10 @@ void FASTCALL CTapDriver::GetMacAddr(BYTE *mac)
 //	Receive
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL CTapDriver::PendingPackets()
+BOOL CTapDriver::PendingPackets()
 {
 	struct pollfd fds;
 
-	ASSERT(this);
 	ASSERT(m_hTAP != -1);
 
 	// Check if there is data that can be received
@@ -384,12 +376,8 @@ BOOL FASTCALL CTapDriver::PendingPackets()
 //	Receive
 //
 //---------------------------------------------------------------------------
-int FASTCALL CTapDriver::Rx(BYTE *buf)
+int CTapDriver::Rx(BYTE *buf)
 {
-	DWORD dwReceived;
-	DWORD crc;
-
-	ASSERT(this);
 	ASSERT(m_hTAP != -1);
 
 	// Check if there is data that can be received
@@ -398,7 +386,7 @@ int FASTCALL CTapDriver::Rx(BYTE *buf)
 	}
 
 	// Receive
-	dwReceived = read(m_hTAP, buf, ETH_FRAME_LEN);
+	DWORD dwReceived = read(m_hTAP, buf, ETH_FRAME_LEN);
 	if (dwReceived == (DWORD)-1) {
 		LOGWARN("%s Error occured while receiving an packet", __PRETTY_FUNCTION__);
 		return 0;
@@ -411,7 +399,7 @@ int FASTCALL CTapDriver::Rx(BYTE *buf)
 		// need it.
 
 		// Initialize the CRC
-		crc = crc32(0L, Z_NULL, 0);
+		DWORD crc = crc32(0L, Z_NULL, 0);
 		// Calculate the CRC
 		crc = crc32(crc, buf, dwReceived);
 
@@ -420,7 +408,7 @@ int FASTCALL CTapDriver::Rx(BYTE *buf)
 		buf[dwReceived + 2] = (BYTE)((crc >> 16) & 0xFF);
 		buf[dwReceived + 3] = (BYTE)((crc >> 24) & 0xFF);
 
-		LOGDEBUG("%s CRC is %08lX - %02X %02X %02X %02X\n", __PRETTY_FUNCTION__, crc, buf[dwReceived+0], buf[dwReceived+1], buf[dwReceived+2], buf[dwReceived+3]);
+		LOGDEBUG("%s CRC is %08X - %02X %02X %02X %02X\n", __PRETTY_FUNCTION__, crc, buf[dwReceived+0], buf[dwReceived+1], buf[dwReceived+2], buf[dwReceived+3]);
 
 		// Add FCS size to the received message size
 		dwReceived += 4;
@@ -445,9 +433,8 @@ int FASTCALL CTapDriver::Rx(BYTE *buf)
 //	Send
 //
 //---------------------------------------------------------------------------
-int FASTCALL CTapDriver::Tx(const BYTE *buf, int len)
+int CTapDriver::Tx(const BYTE *buf, int len)
 {
-	ASSERT(this);
 	ASSERT(m_hTAP != -1);
 
 	if (m_pcap_dumper != NULL) {

@@ -15,24 +15,24 @@
 
 //===========================================================================
 //
-//	ファイルパス
+//	File path
 //
 //===========================================================================
 
 //---------------------------------------------------------------------------
 //
-//	コンストラクタ
+//	Constructor
 //
 //---------------------------------------------------------------------------
 Filepath::Filepath()
 {
-	// クリア
+	// Clear
 	Clear();
 }
 
 //---------------------------------------------------------------------------
 //
-//	デストラクタ
+//	Destructor
 //
 //---------------------------------------------------------------------------
 Filepath::~Filepath()
@@ -41,12 +41,12 @@ Filepath::~Filepath()
 
 //---------------------------------------------------------------------------
 //
-//	代入演算子
+//	Assignment operator
 //
 //---------------------------------------------------------------------------
 Filepath& Filepath::operator=(const Filepath& path)
 {
-	// パス設定(内部でSplitされる)
+	// Set path (split internally)
 	SetPath(path.GetPath());
 
 	return *this;
@@ -54,14 +54,13 @@ Filepath& Filepath::operator=(const Filepath& path)
 
 //---------------------------------------------------------------------------
 //
-//	クリア
+//      Clear
 //
 //---------------------------------------------------------------------------
-void FASTCALL Filepath::Clear()
+void Filepath::Clear()
 {
-	ASSERT(this);
 
-	// パスおよび各部分をクリア
+	// Clear the path and each part
 	m_szPath[0] = _T('\0');
 	m_szDir[0] = _T('\0');
 	m_szFile[0] = _T('\0');
@@ -73,99 +72,24 @@ void FASTCALL Filepath::Clear()
 //	ファイル設定(ユーザ) MBCS用
 //
 //---------------------------------------------------------------------------
-void FASTCALL Filepath::SetPath(LPCSTR path)
+void Filepath::SetPath(LPCSTR path)
 {
-	ASSERT(this);
 	ASSERT(path);
 	ASSERT(strlen(path) < _MAX_PATH);
 
-	// パス名コピー
+	// Copy pathname
 	strcpy(m_szPath, (LPTSTR)path);
 
-	// 分離
+	// Split
 	Split();
 }
-
-#ifdef BAREMETAL
-//---------------------------------------------------------------------------
-//
-//	互換関数(dirname) 結果は直ぐにコピーせよ
-//
-//---------------------------------------------------------------------------
-static char dirtmp[2];
-char* dirname(char *path)
-{
-	char *p;
-	if( path == NULL || *path == '\0' ) {
-		dirtmp[0] = '.';
-		dirtmp[1] = '\0';
-		return dirtmp;
-	}
-
-	p = path + strlen(path) - 1;
-	while( *p == '/' ) {
-		if( p == path )
-			return path;
-		*p-- = '\0';
-	}
-
-	while( p >= path && *p != '/' ) {
-		p--;
-	}
-
-	if (p < path) {
-		dirtmp[0] = '.';
-		dirtmp[1] = '\0';
-		return dirtmp;
-	}
-
-	if (p == path) {
-		dirtmp[0] = '/';
-		dirtmp[1] = '\0';
-		return dirtmp;
-	}
-
-	*p = 0;
-	return path;
-}
-
-//---------------------------------------------------------------------------
-//
-//	互換関数(basename) 結果は直ぐにコピーせよ
-//
-//---------------------------------------------------------------------------
-static char basetmp[2];
-char* basename(char *path)
-{
-	char *p;
-	if( path == NULL || *path == '\0' ) {
-		basetmp[0] = '/';
-		basetmp[1] = '\0';
-		return basetmp;
-	}
-
-	p = path + strlen(path) - 1;
-	while( *p == '/' ) {
-		if( p == path ) {
-			return path;
-		}
-		*p-- = '\0';
-	}
-
-	while( p >= path && *p != '/' ) {
-		p--;
-	}
-
-	return p + 1;
-}
-#endif	// BAREMETAL
 
 //---------------------------------------------------------------------------
 //
 //	パス分離
 //
 //---------------------------------------------------------------------------
-void FASTCALL Filepath::Split()
+void Filepath::Split()
 {
 	LPTSTR pDir;
 	LPTSTR pDirName;
@@ -173,7 +97,6 @@ void FASTCALL Filepath::Split()
 	LPTSTR pBaseName;
 	LPTSTR pExtName;
 
-	ASSERT(this);
 
 	// パーツを初期化
 	m_szDir[0] = _T('\0');
@@ -208,80 +131,12 @@ void FASTCALL Filepath::Split()
 
 //---------------------------------------------------------------------------
 //
-//	パス合成
+//	File name + extension acquisition
+//	The returned pointer is temporary. Copy immediately.
 //
 //---------------------------------------------------------------------------
-void FASTCALL Filepath::Make()
+LPCTSTR Filepath::GetFileExt() const
 {
-	ASSERT(this);
-
-	// パス初期化
-	m_szPath[0] = _T('\0');
-
-	// 合成
-	strncat(m_szPath, m_szDir, ARRAY_SIZE(m_szPath) - strlen(m_szPath));
-	strncat(m_szPath, m_szFile, ARRAY_SIZE(m_szPath) - strlen(m_szPath));
-	strncat(m_szPath, m_szExt, ARRAY_SIZE(m_szPath) - strlen(m_szPath));
-}
-
-//---------------------------------------------------------------------------
-//
-//	クリアされているか
-//
-//---------------------------------------------------------------------------
-BOOL FASTCALL Filepath::IsClear() const
-{
-	// Clear()の逆
-	if ((m_szPath[0] == _T('\0')) &&
-		(m_szDir[0] == _T('\0')) &&
-		(m_szFile[0] == _T('\0')) &&
-		(m_szExt[0] == _T('\0'))) {
-		// 確かに、クリアされている
-		return TRUE;
-	}
-
-	// クリアされていない
-	return FALSE;
-}
-
-//---------------------------------------------------------------------------
-//
-//	ショート名取得
-//	※返されるポインタは一時的なもの。すぐコピーすること
-//	※FDIDiskのdisk.nameとの関係で、文字列は最大59文字+終端とすること
-//
-//---------------------------------------------------------------------------
-const char* FASTCALL Filepath::GetShort() const
-{
-	char szFile[_MAX_FNAME];
-	char szExt[_MAX_EXT];
-
-	ASSERT(this);
-
-	// TCHAR文字列からchar文字列へ変換
-	strcpy(szFile, m_szFile);
-	strcpy(szExt, m_szExt);
-
-	// 固定バッファへ合成
-	strcpy(ShortName, szFile);
-	strcat(ShortName, szExt);
-
-	// strlenで調べたとき、最大59になるように細工
-	ShortName[59] = '\0';
-
-	// const charとして返す
-	return (const char*)ShortName;
-}
-
-//---------------------------------------------------------------------------
-//
-//	ファイル名＋拡張子取得
-//	※返されるポインタは一時的なもの。すぐコピーすること
-//
-//---------------------------------------------------------------------------
-LPCTSTR FASTCALL Filepath::GetFileExt() const
-{
-	ASSERT(this);
 
 	// 固定バッファへ合成
 	strcpy(FileExt, m_szExt);
@@ -292,27 +147,11 @@ LPCTSTR FASTCALL Filepath::GetFileExt() const
 
 //---------------------------------------------------------------------------
 //
-//	パス比較
+//	Save
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL Filepath::CmpPath(const Filepath& path) const
+BOOL Filepath::Save(Fileio *fio, int /*ver*/)
 {
-	// パスが完全一致していればTRUE
-	if (strcmp(path.GetPath(), GetPath()) == 0) {
-		return TRUE;
-	}
-
-	return FALSE;
-}
-
-//---------------------------------------------------------------------------
-//
-//	セーブ
-//
-//---------------------------------------------------------------------------
-BOOL FASTCALL Filepath::Save(Fileio *fio, int /*ver*/)
-{
-	ASSERT(this);
 	ASSERT(fio);
 
 	return TRUE;
@@ -320,12 +159,11 @@ BOOL FASTCALL Filepath::Save(Fileio *fio, int /*ver*/)
 
 //---------------------------------------------------------------------------
 //
-//	ロード
+//	Load
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL Filepath::Load(Fileio *fio, int /*ver*/)
+BOOL Filepath::Load(Fileio *fio, int /*ver*/)
 {
-	ASSERT(this);
 	ASSERT(fio);
 
 	return TRUE;
@@ -333,14 +171,7 @@ BOOL FASTCALL Filepath::Load(Fileio *fio, int /*ver*/)
 
 //---------------------------------------------------------------------------
 //
-//	ショート名
-//
-//---------------------------------------------------------------------------
-char Filepath::ShortName[_MAX_FNAME + _MAX_DIR];
-
-//---------------------------------------------------------------------------
-//
-//	ファイル名＋拡張子
+//	Filename and extension
 //
 //---------------------------------------------------------------------------
 TCHAR Filepath::FileExt[_MAX_FNAME + _MAX_DIR];

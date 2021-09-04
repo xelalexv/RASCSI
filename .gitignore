@@ -18,3 +18,5 @@ src/buildroot/staging
 src/buildroot/target
 src/buildroot/Makefile
 src/buildroot/.br2*
+
+src/raspberrypi/hfdisk/

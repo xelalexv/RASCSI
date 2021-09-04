@@ -24,14 +24,14 @@
 //	SASI Hard Disk
 //
 //===========================================================================
-class SASIHD : public Disk
+class SASIHD : public Disk, public FileSupport
 {
 public:
 	// Basic Functions
 	SASIHD();								// Constructor
-	void FASTCALL Reset();							// Reset
-	BOOL FASTCALL Open(const Filepath& path, BOOL attn = TRUE);		// Open
+	void Reset();							// Reset
+	void Open(const Filepath& path);		// Open
 
 	// commands
-	int FASTCALL RequestSense(const DWORD *cdb, BYTE *buf);			// REQUEST SENSE command
+	int RequestSense(const DWORD *cdb, BYTE *buf);			// REQUEST SENSE command
 };
