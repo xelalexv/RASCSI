@@ -14,6 +14,7 @@ src/oled_monitor/current
 src/buildroot/build
 src/buildroot/host
 src/buildroot/images
+src/buildroot/staging
 src/buildroot/target
 src/buildroot/Makefile
 src/buildroot/.br2*
