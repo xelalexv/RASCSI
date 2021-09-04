@@ -6,6 +6,8 @@ core
 *.swp
 *.tmp
 __pycache__
+rascsi-*.tar.gz
+
 src/web/current
 src/oled_monitor/current
 
