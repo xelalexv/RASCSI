@@ -4,7 +4,7 @@
 #
 #################################################################################
 
-RASCSI_VERSION = 1.25
+RASCSI_VERSION = 1.32
 RASCSI_SOURCE = rascsi-$(RASCSI_VERSION).tar.gz
 RASCSI_SITE = file:///home/akuker
 RASCSI_LICENSE = BSD-3-Clause
@@ -14,18 +14,22 @@ RASCSI_INSTALL_STAGING = YES
 RASCSI_DEPENDENCIES += spdlog
 RASCSI_DEPENDENCIES += libzlib
 RASCSI_CFLAGS = -Dasdf
+RASCSI_STRIP_COMPONENTS = 0
 
 define RASCSI_BUILD_CMDS
 	$(MAKE) $(TARGET_CONFIGURE_OPTS) -C $(@D) bin-all
 endef
 
 define RASCSI_INSTALL_STAGING_CMDS
-	$(INSTALL) -D -m 0755 $(@D)/bin/fullspec/rascsi  $(STAGING_DIR)/usr/bin
-	$(INSTALL) -D -m 0755 $(@D)/bin/fullspec/rasctl  $(STAGING_DIR)/usr/bin
-	$(INSTALL) -D -m 0755 $(@D)/bin/fullspec/scsimon $(STAGING_DIR)/usr/bin
 endef
 
 define RASCSI_INSTALL_TARGET_CMDS
+	$(INSTALL) -D -m 0755 $(@D)/src/raspberrypi/bin/fullspec/rascsi  $(TARGET_DIR)/usr/bin
+	$(INSTALL) -D -m 0755 $(@D)/src/raspberrypi/bin/fullspec/rasctl  $(TARGET_DIR)/usr/bin
+	$(INSTALL) -D -m 0755 $(@D)/src/raspberrypi/bin/fullspec/scsimon $(TARGET_DIR)/usr/bin
+	$(INSTALL) -D -m 0755 $(@D)/doc/rascsi.1 $(TARGET_DIR)/usr/share/man/man1
+	$(INSTALL) -D -m 0755 $(@D)/doc/rasctl.1 $(TARGET_DIR)/usr/share/man/man1
+	$(INSTALL) -D -m 0755 $(@D)/doc/scsimon.1 $(TARGET_DIR)/usr/share/man/man1
 endef
 
 #	$(INSTALL) -D -m 0755 $(@D)/libfoo.so* $(TARGET_DIR)/usr/lib
