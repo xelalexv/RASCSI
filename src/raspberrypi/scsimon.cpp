@@ -8,7 +8,7 @@
 //	[ RaSCSI main ]
 //
 //---------------------------------------------------------------------------
-
+#include <climits>
 #include "os.h"
 #include "xm6.h"
 #include "filepath.h"
