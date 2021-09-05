@@ -514,6 +514,7 @@ void GetAvailableLogLevels(PbServerInfo& serverInfo)
 
 void GetAvailableImages(PbServerInfo& serverInfo)
 {
+	/*
 	if (access(default_image_folder.c_str(), F_OK) != -1) {
 		for (const auto& entry : filesystem::directory_iterator(default_image_folder)) {
 			if (entry.is_regular_file()) {
@@ -522,6 +523,8 @@ void GetAvailableImages(PbServerInfo& serverInfo)
 			}
 		}
 	}
+	*/
+	return;
 }
 
 bool SetDefaultImageFolder(const string& f)
