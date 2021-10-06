@@ -6,7 +6,7 @@ on:
   push:
     branches: [ rpi_image_creation ]
   pull_request:
-    branches: [ rpi_image_creation]
+    branches: [ rpi_image_creation ]
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
