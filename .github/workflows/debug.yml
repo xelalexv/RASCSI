@@ -59,5 +59,12 @@ jobs:
           echo Github Ref: $GITHUB_REF
           echo Github Ref: $GITHUB_REF
           echo Github CI: $CI
+          if [ "$CI" = "true" ]; then
+            echo "Strings are equal."
+          else
+            echo "Strings are not equal."
+          fi
+          echo ("${CI}" == true)
+          echo ("${CI}" != true)
           echo Full URL: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
         working-directory: pi-gen
