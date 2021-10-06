@@ -58,5 +58,6 @@ jobs:
           echo Github Ref: $GITHUB_REF
           echo Github Ref: $GITHUB_REF
           echo Github Ref: $GITHUB_REF
+          echo Github CI: $CI
           echo Full URL: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
         working-directory: pi-gen
