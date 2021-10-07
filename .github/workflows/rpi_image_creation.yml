@@ -67,6 +67,7 @@ jobs:
           echo "LOCALE_DEFAULT=en_US.UTF-8" >> config
           echo "KEYBOARD_KEYMAP=us" >> config
           echo "KEYBOARD_LAYOUT=\"English (US)\"" >> config
+          echo "GITHUB_REF=$GITHUB_REF" >> config
           echo -----------------------------------------------------
           cat config
         working-directory: pi-gen
