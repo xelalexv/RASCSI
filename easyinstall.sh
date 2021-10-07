@@ -103,10 +103,12 @@ www-data ALL=NOPASSWD: /sbin/shutdown, /sbin/reboot
 " >> /etc/sudoers'
     fi
 
-    sudo systemctl daemon-reload
-    sudo systemctl restart rsyslog
-    sudo systemctl enable rascsi # optional - start rascsi at boot
-    sudo systemctl start rascsi
+    if [ "$CI" != "true" ]; then
+        sudo systemctl daemon-reload
+        sudo systemctl restart rsyslog
+        sudo systemctl enable rascsi # optional - start rascsi at boot
+        sudo systemctl start rascsi
+    fi
 }
 
 # install everything required to run an HTTP server (Nginx + Python Flask App)
@@ -123,14 +125,18 @@ function installRaScsiWebInterface() {
 
     sudo usermod -a -G pi www-data
 
-    sudo systemctl reload nginx
+    if [ "$CI" != "true" ]; then
+        sudo systemctl reload nginx
+    fi
 
     echo "Installing the rascsi-web.service configuration..."
     sudo cp ~/RASCSI/src/web/service-infra/rascsi-web.service /etc/systemd/system/rascsi-web.service
 
-    sudo systemctl daemon-reload
-    sudo systemctl enable rascsi-web
-    sudo systemctl start rascsi-web
+    if [ "$CI" != "true" ]; then
+        sudo systemctl daemon-reload
+        sudo systemctl enable rascsi-web
+        sudo systemctl start rascsi-web
+    fi
 }
 
 function createImagesDir() {
@@ -144,12 +150,14 @@ function createImagesDir() {
 }
 
 function stopOldWebInterface() {
-    sudo systemctl stop rascsi-web
     APACHE_STATUS=$(sudo systemctl status apache2 &> /dev/null; echo $?)
-    if [ "$APACHE_STATUS" -eq 0 ] ; then
-        echo "Stopping old Apache2 RaSCSI Web..."
-        sudo systemctl disable apache2
-        sudo systemctl stop apache2
+    if [ "$CI" != "true" ]; then
+        sudo systemctl stop rascsi-web
+        if [ "$APACHE_STATUS" -eq 0 ] ; then
+            echo "Stopping old Apache2 RaSCSI Web..."
+            sudo systemctl disable apache2
+            sudo systemctl stop apache2
+        fi
     fi
 }
 
@@ -172,11 +180,15 @@ function updateRaScsiGit() {
 }
 
 function showRaScsiStatus() {
-    sudo systemctl status rascsi | tee
+    if [ "$CI" != "true" ]; then
+        sudo systemctl status rascsi | tee
+    fi
 }
 
 function showRaScsiWebStatus() {
-    sudo systemctl status rascsi-web | tee
+    if [ "$CI" != "true" ]; then
+        sudo systemctl status rascsi-web | tee
+    fi
 }
 
 function createDrive600MB() {
@@ -411,7 +423,9 @@ function setupWirelessNetworking() {
 }
 
 function reserveScsiIds() {
-    sudo systemctl stop rascsi
+    if [ "$CI" != "true" ]; then
+        sudo systemctl stop rascsi
+    fi
     echo "WARNING: This will override any existing modifications to rascsi.service!"
     echo "Please type the SCSI ID(s) that you want to reserve and press Enter:"
     echo "The input should be numbers between 0 and 7 separated by commas, e.g. \"0,1,7\" for IDs 0, 1, and 7."
@@ -427,9 +441,10 @@ function reserveScsiIds() {
     fi
 
     echo "Modified /etc/systemd/system/rascsi.service"
-
-    sudo systemctl daemon-reload
-    sudo systemctl start rascsi
+    if [ "$CI" != "true" ]; then
+        sudo systemctl daemon-reload
+	sudo systemctl start rascsi
+    fi
 }
 
 function notifyBackup {
