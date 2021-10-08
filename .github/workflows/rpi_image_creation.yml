@@ -39,7 +39,7 @@ jobs:
           ref: ${{ steps.branch-name.outputs.current_branch }}
       
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - name: Checkout RaSCSI
+      - name: Checkout Pi-Gen
         uses: actions/checkout@v2
         with:
           repository: akuker/pi-gen
