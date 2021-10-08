@@ -44,7 +44,10 @@ jobs:
 #      - name: Install Raspberry Pi build toolchain
 #        run: sudo apt-get install coreutils quilt parted qemu-user-static debootstrap zerofree zip dosfstools libarchive-tools libcap2-bin grep rsync xz-utils file git curl bc qemu-utils kpartx
 
-
+      - name: Get branch names
+        id: branch-name
+        uses: tj-actions/branch-names@v5
+        
       - name: Current branch name
         run: |
           echo "${{ steps.branch-name.outputs.current_branch }}"
