@@ -21,11 +21,22 @@ jobs:
     # Steps represent a sequence of tasks that will be executed as part of the job
     # TODO: I don't think this step is needed....
     steps:
+      - name: Get branch names
+        id: branch-name
+        uses: tj-actions/branch-names@v5
+        
+      - name: Current branch name
+        run: |
+          echo "${{ steps.branch-name.outputs.current_branch }}"
+        # Outputs: "feature/test" current PR branch.
+
+
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - name: Checkout RaSCSI
         uses: actions/checkout@v2
         with:
           path: RASCSI
+          ref: ${{ steps.branch-name.outputs.current_branch }}
       
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - name: Checkout RaSCSI
@@ -67,7 +78,7 @@ jobs:
           echo "LOCALE_DEFAULT=en_US.UTF-8" >> config
           echo "KEYBOARD_KEYMAP=us" >> config
           echo "KEYBOARD_LAYOUT=\"English (US)\"" >> config
-          echo "GITHUB_REF=$GITHUB_REF" >> config
+          echo "GITHUB_REF=${{ steps.branch-name.outputs.current_branch }}" >> config
           echo -----------------------------------------------------
           cat config
         working-directory: pi-gen
