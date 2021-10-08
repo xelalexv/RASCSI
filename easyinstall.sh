@@ -92,9 +92,13 @@ function installRaScsi() {
     echo "++++ Doing Make install"
     sudo make install CONNECT_TYPE=${CONNECT_TYPE-FULLSPEC}
     echo "++++ Done with Make"
-
-    sudoIsReady=$(sudo grep -c "rascsi" /etc/sudoers)
-    echo "++++ Done with sudoIsready"
+    if [ "$CI" != "true" ]; then
+        sudoIsReady=$(sudo grep -c "rascsi" /etc/sudoers)
+        echo "++++ Done with sudoIsready"
+    else
+        sudoIsReady="0"
+        echo "++++ Running CI build... assuming need to setup sudo"
+    fi
 
     if [ $sudoIsReady = "0" ]; then
         sudo bash -c 'echo "
@@ -112,6 +116,8 @@ www-data ALL=NOPASSWD: /sbin/shutdown, /sbin/reboot
         sudo systemctl restart rsyslog
         sudo systemctl enable rascsi # optional - start rascsi at boot
         sudo systemctl start rascsi
+    else
+        sudo systemctl enable rascsi # start rascsi at boot
     fi
     echo "++++ Done with installRaSCSI"
 }
@@ -142,6 +148,8 @@ function installRaScsiWebInterface() {
         sudo systemctl daemon-reload
         sudo systemctl enable rascsi-web
         sudo systemctl start rascsi-web
+    else
+        sudo systemctl enable rascsi-web
     fi
 }
 
