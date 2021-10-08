@@ -102,7 +102,7 @@ jobs:
           echo Github Ref: $GITHUB_REF
           echo Github Ref: $GITHUB_REF
           echo Github CI: $CI
-          echo branch-names head_ref_branch: ${{ steps.branch-names.outputs.head_ref_branch }}
+          echo branch-names head_ref_branch: ${{ steps.branch-name.outputs.head_ref_branch }}
           if [ "$CI" = "true" ]; then
             echo "Running continuous integration build"
           else
