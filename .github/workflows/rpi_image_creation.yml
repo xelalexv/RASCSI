@@ -25,19 +25,6 @@ jobs:
         id: branch-name
         uses: tj-actions/branch-names@v5
         
-      - name: Current branch name
-        run: |
-          echo "${{ steps.branch-name.outputs.current_branch }}"
-        # Outputs: "feature/test" current PR branch.
-
-
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - name: Checkout RaSCSI
-        uses: actions/checkout@v2
-        with:
-          path: RASCSI
-          ref: ${{ steps.branch-name.outputs.current_branch }}
-      
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - name: Checkout Pi-Gen
         uses: actions/checkout@v2
@@ -47,27 +34,6 @@ jobs:
       
       - name: Install Raspberry Pi build toolchain
         run: sudo apt-get install coreutils quilt parted qemu-user-static debootstrap zerofree zip dosfstools libarchive-tools libcap2-bin grep rsync xz-utils file git curl bc qemu-utils kpartx
-
-
-      - name: Dump debug information
-        run: |
-          echo Github Run ID: $GITHUB_RUN_ID
-          echo Github Run Number: $GITHUB_RUN_NUMBER
-          echo Github Event Path: $GITHUB_EVENT_PATH
-          echo Github Repository: $GITHUB_REPOSITORY
-          echo Github Event Path: $GITHUB_EVENT_PATH
-          echo Github Base Ref: $GITHUB_BASE_REF
-          echo Github Head Ref: $GITHUB_HEAD_REF
-          echo Github Ref: $GITHUB_REF
-          echo Github Ref: $GITHUB_REF
-          echo Github Ref: $GITHUB_REF
-          echo Github CI: $CI
-          if [ "$CI" = "true" ]; then
-            echo "Running continuous integration build"
-          else
-            echo "Not running continuous integration build"
-          fi
-          echo Full URL: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
 
       - name: Configure the build
         run: |
