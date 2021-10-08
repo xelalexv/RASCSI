@@ -471,10 +471,15 @@ function runChoice() {
               updateRaScsiGit
               createImagesDir
               installPackages
+	      echo "++++ Starting installRaScsi"
               installRaScsi
+	      echo "++++ Starting installRaScsiWebInterface"
               installRaScsiWebInterface
-              showRaScsiStatus
-              showRaScsiWebStatus
+	      echo "++++ Starting showRaScsiStatus"
+              ##showRaScsiStatus
+	      echo "++++ Starting showRaScsiWebStatus"
+              ##showRaScsiWebStatus
+	      echo "++++ Starting installRaScsi"
               notifyBackup
               echo "Installing / Updating RaSCSI Service (${CONNECT_TYPE-FULLSPEC}) + Web interface - Complete!"
           ;;
