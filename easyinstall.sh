@@ -92,10 +92,13 @@ function installRaScsi() {
     echo "++++ Doing Make install"
     sudo make install CONNECT_TYPE=${CONNECT_TYPE-FULLSPEC}
     echo "++++ Done with Make"
+    set -v
     if [ "$CI" != "true" ]; then
+        echo "++++ Doing sudoIsReady check"
         sudoIsReady=$(sudo grep -c "rascsi" /etc/sudoers)
         echo "++++ Done with sudoIsready"
     else
+        echo "++++ Setting sudoIsReady=0"
         sudoIsReady="0"
         echo "++++ Running CI build... assuming need to setup sudo"
     fi
@@ -120,6 +123,7 @@ www-data ALL=NOPASSWD: /sbin/shutdown, /sbin/reboot
         sudo systemctl enable rascsi # start rascsi at boot
     fi
     echo "++++ Done with installRaSCSI"
+    set +v
 }
 
 # install everything required to run an HTTP server (Nginx + Python Flask App)
