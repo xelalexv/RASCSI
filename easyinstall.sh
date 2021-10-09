@@ -95,13 +95,13 @@ function installRaScsi() {
     sudo make install CONNECT_TYPE=${CONNECT_TYPE-FULLSPEC}
     echo "++++ Done with Make"
     set -v
-    if [ "$CI" != "true" ]; then
+    if [ "$PI_GEN" != "pi-gen" ]; then
         echo "++++ Doing sudoIsReady check CI: $CI"
         #sudoIsReady=$(sudo grep -c "rascsi" /etc/sudoers)
 	sudoIsReady="1"
         echo "++++ Done with sudoIsready"
     else
-        echo "++++ Setting sudoIsReady=0 $CI"
+        echo "++++ Setting sudoIsReady=0 $CI Pi-gen is $PI_GEN"
         sudoIsReady="0"
         echo "++++ Running CI build... assuming need to setup sudo"
     fi
@@ -140,7 +140,7 @@ function installRaScsiWebInterface() {
 
     sudo usermod -a -G pi www-data
 
-    if [ "$CI" != "true" ]; then
+    if [ "$PI_GEN" != "pi-gen" ]; then
         sudo systemctl reload nginx
     fi
 
@@ -164,7 +164,7 @@ function createImagesDir() {
 
 function stopOldWebInterface() {
     APACHE_STATUS=$(sudo systemctl status apache2 &> /dev/null; echo $?)
-    if [ "$CI" != "true" ]; then
+    if [ "$PI_GEN" != "pi-gen" ]; then
         sudo systemctl stop rascsi-web
         if [ "$APACHE_STATUS" -eq 0 ] ; then
             echo "Stopping old Apache2 RaSCSI Web..."
