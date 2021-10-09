@@ -76,6 +76,8 @@ function installPackages() {
 
 # compile and install RaSCSI Service
 function installRaScsi() {
+    printenv
+
     sudo systemctl stop rascsi
 
     if [ -f /etc/systemd/system/rascsi.service ]; then
@@ -115,14 +117,10 @@ www-data ALL=NOPASSWD: /sbin/shutdown, /sbin/reboot
     fi
     echo "++++ Done with sudo bash"
 
-    if [ "$CI" != "true" ]; then
-        sudo systemctl daemon-reload
-        sudo systemctl restart rsyslog
-        sudo systemctl enable rascsi # optional - start rascsi at boot
-        sudo systemctl start rascsi
-    else
-        sudo systemctl enable rascsi # start rascsi at boot
-    fi
+    sudo systemctl daemon-reload
+    sudo systemctl restart rsyslog
+    sudo systemctl enable rascsi # optional - start rascsi at boot
+    sudo systemctl start rascsi
     echo "++++ Done with installRaSCSI"
     set +v
 }
@@ -149,13 +147,9 @@ function installRaScsiWebInterface() {
     echo "Installing the rascsi-web.service configuration..."
     sudo cp ~/RASCSI/src/web/service-infra/rascsi-web.service /etc/systemd/system/rascsi-web.service
 
-    if [ "$CI" != "true" ]; then
-        sudo systemctl daemon-reload
-        sudo systemctl enable rascsi-web
-        sudo systemctl start rascsi-web
-    else
-        sudo systemctl enable rascsi-web
-    fi
+    sudo systemctl daemon-reload
+    sudo systemctl enable rascsi-web
+    sudo systemctl start rascsi-web
 }
 
 function createImagesDir() {
