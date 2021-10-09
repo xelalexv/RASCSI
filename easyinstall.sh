@@ -94,8 +94,9 @@ function installRaScsi() {
     echo "++++ Done with Make"
     set -v
     if [ "$CI" != "true" ]; then
-        echo "++++ Doing sudoIsReady check $CI"
-        sudoIsReady=$(sudo grep -c "rascsi" /etc/sudoers)
+        echo "++++ Doing sudoIsReady check CI: $CI"
+        #sudoIsReady=$(sudo grep -c "rascsi" /etc/sudoers)
+	sudoIsReady="1"
         echo "++++ Done with sudoIsready"
     else
         echo "++++ Setting sudoIsReady=0 $CI"
