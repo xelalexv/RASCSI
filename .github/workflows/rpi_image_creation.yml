@@ -49,6 +49,9 @@ jobs:
           cat config
         working-directory: pi-gen
 
+      - name: Stop the udisks2 service
+        run: sudo systemctl stop udisks2.service
+
       - name: Run the Raspberry Pi build generation tool
         run: sudo ./build.sh
         working-directory: pi-gen     
