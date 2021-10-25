@@ -33,6 +33,9 @@ jobs:
           path: pi-gen
       
       - name: Install Raspberry Pi build toolchain
+        run: sudo apt-get update
+      
+      - name: Install Raspberry Pi build toolchain
         run: sudo apt-get install coreutils quilt parted qemu-user-static debootstrap zerofree zip dosfstools libarchive-tools libcap2-bin grep rsync xz-utils file git curl bc qemu-utils kpartx
 
       - name: Configure the build
