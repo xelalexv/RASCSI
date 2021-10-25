@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
     {% block content %}
-    <p><a href="javascript:history.back()">Cancel</a></p>
+    <p><a href="/">Cancel</a></p>
     <h2>Disclaimer</h2>
     <p>These device profiles are provided as-is with no guarantee to work on the systems mentioned. You may need appropirate device drivers and/or configuration parameters. If you have improvement suggestions or success stories to share we would love to hear from you, so please connect with us at <a href="https://github.com/akuker/RASCSI">GitHub</a> or <a href="https://discord.gg/PyS58u6">Discord</a>!</p>
     <h2>Hard Drives</h2>
@@ -37,7 +37,7 @@
                     <input type="hidden" name="size" value="{{hd.size}}">
 		    <input type="hidden" name="file_type" value="{{hd.file_type}}">
 		    <label for="file_name">Save as:</label>
-		    <input type="text" name="file_name" value="{{hd.secure_name}}" />.{{hd.file_type}}
+		    <input type="text" name="file_name" value="{{hd.secure_name}}" required />.{{hd.file_type}}
                     <input type="submit" value="Create" />
                 </form>
             </td>
@@ -127,7 +127,7 @@
                     <input type="hidden" name="size" value="{{rm.size}}">
 		    <input type="hidden" name="file_type" value="{{rm.file_type}}">
 		    <label for="file_name">Save as:</label>
-		    <input type="text" name="file_name" value="{{rm.secure_name}}" />.{{rm.file_type}}
+		    <input type="text" name="file_name" value="{{rm.secure_name}}" required />.{{rm.file_type}}
                     <input type="submit" value="Create" />
                 </form>
             </td>
@@ -136,6 +136,6 @@
         </tbody>
     </table>
     <p><small>Available disk space on the Pi: {{free_disk}} MB</small></p>
-    <p><a href="javascript:history.back()">Cancel</a></p>
+    <p><a href="/">Cancel</a></p>
 
 {% endblock %}

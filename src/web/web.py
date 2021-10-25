@@ -16,9 +16,10 @@ from file_cmds import (
     list_images,
     create_new_image,
     download_file_to_iso,
+    delete_image,
     delete_file,
     unzip_file,
-    download_image,
+    download_to_dir,
     write_config,
     read_config,
     write_drive_properties,
@@ -28,7 +29,8 @@ from pi_cmds import (
     shutdown_pi,
     reboot_pi,
     running_env,
-    rascsi_service,
+    systemd_service,
+    running_netatalk,
     is_bridge_setup,
     disk_space,
 )
@@ -43,7 +45,6 @@ from ractl_cmds import (
     get_server_info,
     get_network_info,
     get_device_types,
-    validate_scsi_id,
     set_log_level,
 )
 from settings import *
@@ -63,9 +64,16 @@ def index():
     sorted_image_files = sorted(files["files"], key = lambda x: x["name"].lower())
     sorted_config_files = sorted(config_files, key = lambda x: x.lower())
 
+    from pathlib import Path
+    attached_images = []
+    luns = 0
+    for d in devices["device_list"]:
+        attached_images.append(Path(d["image"]).name)
+        luns += int(d["un"])
+
     reserved_scsi_ids = server_info["reserved_ids"]
+    scsi_ids, recommended_id = get_valid_scsi_ids(devices["device_list"], reserved_scsi_ids)
     formatted_devices = sort_and_format_devices(devices["device_list"])
-    scsi_ids = get_valid_scsi_ids(devices["device_list"], reserved_scsi_ids)
 
     valid_file_suffix = "."+", .".join(
             server_info["sahd"] +
@@ -76,15 +84,20 @@ def index():
             list(ARCHIVE_FILE_SUFFIX)
             )
 
-
     return render_template(
         "index.html",
         bridge_configured=is_bridge_setup(),
+        netatalk_configured=running_netatalk(),
         devices=formatted_devices,
         files=sorted_image_files,
         config_files=sorted_config_files,
-        base_dir=base_dir,
+        base_dir=server_info["image_dir"],
+        cfg_dir=cfg_dir,
+        afp_dir=afp_dir,
         scsi_ids=scsi_ids,
+        recommended_id=recommended_id,
+        attached_images=attached_images,
+        luns=luns,
         reserved_scsi_ids=reserved_scsi_ids,
         max_file_size=int(MAX_FILE_SIZE / 1024 / 1024),
         running_env=running_env(),
@@ -95,6 +108,7 @@ def index():
         device_types=device_types["device_types"],
         free_disk=int(disk["free"] / 1024 / 1024),
         valid_file_suffix=valid_file_suffix,
+        archive_file_suffix=ARCHIVE_FILE_SUFFIX,
         removable_device_types=REMOVABLE_DEVICE_TYPES,
     )
 
@@ -148,7 +162,7 @@ def drive_list():
     return render_template(
         "drives.html",
         files=sorted_image_files,
-        base_dir=base_dir,
+        base_dir=server_info["image_dir"],
         hd_conf=hd_conf,
         cd_conf=cd_conf,
         rm_conf=rm_conf,
@@ -185,16 +199,15 @@ def drive_create():
         return redirect(url_for("index"))
 
     # Creating the drive properties file
-    from pathlib import Path
-    file_name = str(Path(file_name).stem) + "." + PROPERTIES_SUFFIX
+    prop_file_name = f"{file_name}.{file_type}.{PROPERTIES_SUFFIX}"
     properties = {"vendor": vendor, "product": product, \
             "revision": revision, "block_size": block_size}
-    process = write_drive_properties(file_name, properties)
+    process = write_drive_properties(prop_file_name, properties)
     if process["status"] == True:
-        flash(f"Drive properties file {file_name} created")
+        flash(f"Drive properties file {prop_file_name} created")
         return redirect(url_for("index"))
     else:
-        flash(f"Failed to create drive properties file {file_name}", "error")
+        flash(f"Failed to create drive properties file {prop_file_name}", "error")
         return redirect(url_for("index"))
 
 
@@ -207,9 +220,13 @@ def drive_cdrom():
     file_name = request.form.get("file_name")
 
     # Creating the drive properties file
-    from pathlib import Path
-    file_name = str(Path(file_name).stem) + "." + PROPERTIES_SUFFIX
-    properties = {"vendor": vendor, "product": product, "revision": revision, "block_size": block_size}
+    file_name = f"{file_name}.{PROPERTIES_SUFFIX}"
+    properties = {
+                "vendor": vendor,
+                "product": product,
+                "revision": revision,
+                "block_size": block_size,
+            }
     process = write_drive_properties(file_name, properties)
     if process["status"] == True:
         flash(f"Drive properties file {file_name} created")
@@ -230,7 +247,7 @@ def config_save():
         flash(process["msg"])
         return redirect(url_for("index"))
     else:
-        flash(f"Failed to saved config to {file_name}!", "error")
+        flash(f"Failed to save config to {file_name}!", "error")
         flash(process['msg'], "error")
         return redirect(url_for("index"))
 
@@ -250,10 +267,9 @@ def config_load():
             flash(process['msg'], "error")
             return redirect(url_for("index"))
     elif "delete" in request.form:
-        process = delete_file(file_name)
+        process = delete_file(cfg_dir + file_name)
         if process["status"] == True:
             flash(f"Deleted config {file_name}!")
-            flash(process["msg"])
             return redirect(url_for("index"))
         else:
             flash(f"Failed to delete {file_name}!", "error")
@@ -310,17 +326,12 @@ def daynaport_attach():
             arg += (":" + ip + "/" + mask)
         kwargs["interfaces"] = arg
 
-    validate = validate_scsi_id(scsi_id)
-    if validate["status"] == False:
-        flash(validate["msg"], "error")
-        return redirect(url_for("index"))
-
     process = attach_image(scsi_id, **kwargs)
     if process["status"] == True:
-        flash(f"Attached DaynaPORT to SCSI id {scsi_id}!")
+        flash(f"Attached DaynaPORT to SCSI ID {scsi_id}!")
         return redirect(url_for("index"))
     else:
-        flash(f"Failed to attach DaynaPORT to SCSI id {scsi_id}!", "error")
+        flash(f"Failed to attach DaynaPORT to SCSI ID {scsi_id}!", "error")
         flash(process["msg"], "error")
         return redirect(url_for("index"))
 
@@ -330,27 +341,30 @@ def attach():
     file_name = request.form.get("file_name")
     file_size = request.form.get("file_size")
     scsi_id = request.form.get("scsi_id")
+    un = request.form.get("un")
     device_type = request.form.get("type")
 
-    validate = validate_scsi_id(scsi_id)
-    if validate["status"] == False:
-        flash(validate["msg"], "error")
-        return redirect(url_for("index"))
+    kwargs = {"unit": int(un), "image": file_name}
 
-    kwargs = {"image": file_name}
+    # The most common block size is 512 bytes
+    expected_block_size = 512
 
     if device_type != "":
         kwargs["device_type"] = device_type
+        if device_type == "SCCD":
+            expected_block_size = 2048
+        elif device_type == "SAHD":
+            expected_block_size = 256
  
     # Attempt to load the device properties file:
-    # same base path but PROPERTIES_SUFFIX instead of the original suffix.
+    # same base path but with PROPERTIES_SUFFIX appended
     from pathlib import Path
-    file_name_base = str(Path(file_name).stem)
-    drive_properties = Path(base_dir + file_name_base + "." + PROPERTIES_SUFFIX)
-    if drive_properties.is_file():
-        process = read_drive_properties(str(drive_properties))
+    drive_properties = f"{cfg_dir}{file_name}.{PROPERTIES_SUFFIX}"
+    if Path(drive_properties).is_file():
+        process = read_drive_properties(drive_properties)
         if process["status"] == False:
-            flash(f"Failed to load the device properties file {file_name_base}.{PROPERTIES_SUFFIX}", "error")
+            flash(f"Failed to load the device properties \
+                    file {file_name_base}.{PROPERTIES_SUFFIX}", "error")
             flash(process["msg"], "error")
             return redirect(url_for("index"))
         conf = process["conf"]
@@ -358,13 +372,18 @@ def attach():
         kwargs["product"] = conf["product"]
         kwargs["revision"] = conf["revision"]
         kwargs["block_size"] = conf["block_size"]
+        expected_block_size = conf["block_size"]
 
     process = attach_image(scsi_id, **kwargs)
     if process["status"] == True:
-        flash(f"Attached {file_name} to SCSI id {scsi_id}!")
+        flash(f"Attached {file_name} to SCSI ID {scsi_id} LUN {un}!")
+        if int(file_size) % int(expected_block_size):
+            flash(f"The image file size {file_size} bytes is not a multiple of \
+                    {expected_block_size} and RaSCSI will ignore the trailing data. \
+                    The image may be corrupted so proceed with caution.", "error")
         return redirect(url_for("index"))
     else:
-        flash(f"Failed to attach {file_name} to SCSI id {scsi_id}!", "error")
+        flash(f"Failed to attach {file_name} to SCSI ID {scsi_id} LUN {un}!", "error")
         flash(process["msg"], "error")
         return redirect(url_for("index"))
 
@@ -384,12 +403,13 @@ def detach_all_devices():
 @app.route("/scsi/detach", methods=["POST"])
 def detach():
     scsi_id = request.form.get("scsi_id")
-    process = detach_by_id(scsi_id)
+    un = request.form.get("un")
+    process = detach_by_id(scsi_id, un)
     if process["status"] == True:
-        flash(f"Detached SCSI id {scsi_id}!")
+        flash(f"Detached SCSI ID {scsi_id} LUN {un}!")
         return redirect(url_for("index"))
     else:
-        flash(f"Failed to detach SCSI id {scsi_id}!", "error")
+        flash(f"Failed to detach SCSI ID {scsi_id} LUN {un}!", "error")
         flash(process["msg"], "error")
         return redirect(url_for("index"))
 
@@ -397,24 +417,27 @@ def detach():
 @app.route("/scsi/eject", methods=["POST"])
 def eject():
     scsi_id = request.form.get("scsi_id")
-    process = eject_by_id(scsi_id)
+    un = request.form.get("un")
+
+    process = eject_by_id(scsi_id, un)
     if process["status"] == True:
-        flash(f"Ejected scsi id {scsi_id}!")
+        flash(f"Ejected SCSI ID {scsi_id} LUN {un}!")
         return redirect(url_for("index"))
     else:
-        flash(f"Failed to eject SCSI id {scsi_id}!", "error")
+        flash(f"Failed to eject SCSI ID {scsi_id} LUN {un}!", "error")
         flash(process["msg"], "error")
         return redirect(url_for("index"))
 
 @app.route("/scsi/info", methods=["POST"])
 def device_info():
     scsi_id = request.form.get("scsi_id")
+    un = request.form.get("un")
 
-    devices = list_devices(scsi_id)
+    devices = list_devices(scsi_id, un)
 
     # First check if any device at all was returned
     if devices["status"] == False:
-        flash(f"No device attached to SCSI id {scsi_id}!", "error")
+        flash(f"No device attached to SCSI ID {scsi_id} LUN {un}!", "error")
         return redirect(url_for("index"))
     # Looking at the first dict in list to get
     # the one and only device that should have been returned
@@ -422,7 +445,7 @@ def device_info():
     if str(device["id"]) == scsi_id:
         flash("=== DEVICE INFO ===")
         flash(f"SCSI ID: {device['id']}")
-        flash(f"Unit: {device['un']}")
+        flash(f"LUN: {device['un']}")
         flash(f"Type: {device['device_type']}")
         flash(f"Status: {device['status']}")
         flash(f"File: {device['image']}")
@@ -430,28 +453,36 @@ def device_info():
         flash(f"Vendor: {device['vendor']}")
         flash(f"Product: {device['product']}")
         flash(f"Revision: {device['revision']}")
-        flash(f"Block Size: {device['block_size']}")
+        flash(f"Block Size: {device['block_size']} bytes")
+        flash(f"Image Size: {device['size']} bytes")
         return redirect(url_for("index"))
     else:
-        flash(f"Failed to get device info for SCSI id {scsi_id}!", "error")
+        flash(f"Failed to get device info for SCSI ID {scsi_id} LUN {un}!", "error")
         return redirect(url_for("index"))
 
 @app.route("/pi/reboot", methods=["POST"])
 def restart():
-    flash("Restarting the Pi momentarily...")
+    detach_all()
+    flash("Safely detached all devices.")
+    flash("Rebooting the Pi momentarily...")
     reboot_pi()
     return redirect(url_for("index"))
 
 
 @app.route("/rascsi/restart", methods=["POST"])
 def rascsi_restart():
-    rascsi_service("restart")
+    detach_all()
+    flash("Safely detached all devices.")
     flash("Restarting RaSCSI Service...")
+    systemd_service("rascsi.service", "restart")
+    systemd_service("monitor_rascsi.service", "restart")
     return redirect(url_for("index"))
 
 
 @app.route("/pi/shutdown", methods=["POST"])
 def shutdown():
+    detach_all()
+    flash("Safely detached all devices.")
     flash("Shutting down the Pi momentarily...")
     shutdown_pi()
     return redirect(url_for("index"))
@@ -460,29 +491,39 @@ def shutdown():
 @app.route("/files/download_to_iso", methods=["POST"])
 def download_file():
     scsi_id = request.form.get("scsi_id")
-    validate = validate_scsi_id(scsi_id)
-    if validate["status"] == False:
-        flash(validate["msg"], "error")
-        return redirect(url_for("index"))
 
     url = request.form.get("url")
     process = download_file_to_iso(scsi_id, url)
     if process["status"] == True:
-        flash(f"File Downloaded and Attached to SCSI id {scsi_id}")
+        flash(f"File Downloaded and Attached to SCSI ID {scsi_id}")
         flash(process["msg"])
         return redirect(url_for("index"))
     else:
-        flash(f"Failed to download and attach file {url}", "error")
+        flash(f"Failed to download and/or attach file {url}", "error")
         flash(process["msg"], "error")
         return redirect(url_for("index"))
 
 
-@app.route("/files/download_image", methods=["POST"])
+@app.route("/files/download_to_images", methods=["POST"])
 def download_img():
     url = request.form.get("url")
-    process = download_image(url)
+    server_info = get_server_info()
+    process = download_to_dir(url, server_info["image_dir"])
     if process["status"] == True:
-        flash(f"File Downloaded from {url}")
+        flash(f"File Downloaded from {url} to {server_info['image_dir']}")
+        return redirect(url_for("index"))
+    else:
+        flash(f"Failed to download file {url}", "error")
+        flash(process["msg"], "error")
+        return redirect(url_for("index"))
+
+
+@app.route("/files/download_to_afp", methods=["POST"])
+def download_afp():
+    url = request.form.get("url")
+    process = download_to_dir(url, afp_dir)
+    if process["status"] == True:
+        flash(f"File Downloaded from {url} to {afp_dir}")
         return redirect(url_for("index"))
     else:
         flash(f"Failed to download file {url}", "error")
@@ -500,7 +541,9 @@ def upload_file():
     file = request.files["file"]
     filename = secure_filename(file.filename)
 
-    save_path = path.join(app.config["UPLOAD_FOLDER"], filename)
+    server_info = get_server_info()
+
+    save_path = path.join(server_info["image_dir"], filename)
     current_chunk = int(request.form['dzchunkindex'])
 
     # Makes sure not to overwrite an existing file, 
@@ -528,12 +571,9 @@ def upload_file():
             return make_response(("Transferred file corrupted!", 500))
         else:
             log.info(f"File {file.filename} has been uploaded successfully")
-            if filename.lower().endswith(".zip"):
-                unzip_file(filename)
     else:
         log.debug(f"Chunk {current_chunk + 1} of {total_chunks} "
                   f"for file {file.filename} completed.")
-
 
     return make_response(("File upload successful!", 200))
 
@@ -561,14 +601,15 @@ def create_file():
 @app.route("/files/download", methods=["POST"])
 def download():
     image = request.form.get("image")
-    return send_file(base_dir + image, as_attachment=True)
+    server_info = get_server_info()
+    return send_file(f"{server_info['image_dir']}/{image}", as_attachment=True)
 
 
 @app.route("/files/delete", methods=["POST"])
 def delete():
     file_name = request.form.get("image")
 
-    process = delete_file(file_name)
+    process = delete_image(file_name)
     if process["status"] == True:
         flash(f"File {file_name} deleted!")
         flash(process["msg"])
@@ -579,48 +620,40 @@ def delete():
 
     # Delete the drive properties file, if it exists
     from pathlib import Path
-    file_name = str(Path(file_name).stem) + "." + PROPERTIES_SUFFIX
-    file_path = Path(base_dir + file_name)
-    if file_path.is_file():
-        process = delete_file(file_name)
+    prop_file_path = f"{cfg_dir}{file_name}.{PROPERTIES_SUFFIX}"
+    if Path(prop_file_path).is_file():
+        process = delete_file(prop_file_path)
         if process["status"] == True:
-            flash(f"File {file_name} deleted!")
-            flash(process["msg"])
+            flash(f"File {prop_file_path} deleted!")
             return redirect(url_for("index"))
         else:
-            flash(f"Failed to delete file {file_name}!", "error")
+            flash(f"Failed to delete file {prop_file_path}!", "error")
             flash(process["msg"], "error")
             return redirect(url_for("index"))
 
     return redirect(url_for("index"))
 
 
-@app.route("/files/prop", methods=["POST"])
-def show_properties():
-    file_name = request.form.get("image")
-    from pathlib import PurePath
-    file_name = str(PurePath(file_name).stem) + "." + PROPERTIES_SUFFIX
+@app.route("/files/unzip", methods=["POST"])
+def unzip():
+    image = request.form.get("image")
 
-    process = read_drive_properties(base_dir + file_name)
-    prop = process["conf"]
-
+    process = unzip_file(image)
     if process["status"]:
-        flash("=== DRIVE PROPERTIES ===")
-        flash(f"File Name: {file_name}")
-        flash(f"Vendor: {prop['vendor']}")
-        flash(f"Product: {prop['product']}")
-        flash(f"Revision: {prop['revision']}")
-        flash(f"Block Size: {prop['block_size']}")
+        flash(process["msg"])
         return redirect(url_for("index"))
     else:
-        flash(f"Failed to get drive properties for {file_name}", "error")
+        flash("Failed to unzip " + image, "error")
+        flash(process["msg"], "error")
         return redirect(url_for("index"))
 
 
 if __name__ == "__main__":
     app.secret_key = "rascsi_is_awesome_insecure_secret_key"
     app.config["SESSION_TYPE"] = "filesystem"
-    app.config["UPLOAD_FOLDER"] = base_dir
+
+    server_info = get_server_info()
+    app.config["UPLOAD_FOLDER"] = server_info["image_dir"]
 
     from os import makedirs
     makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
@@ -628,7 +661,7 @@ if __name__ == "__main__":
 
     # Load the default configuration file, if found
     from pathlib import Path
-    default_config_path = Path(base_dir + DEFAULT_CONFIG)
+    default_config_path = Path(cfg_dir + DEFAULT_CONFIG)
     if default_config_path.is_file():
         read_config(DEFAULT_CONFIG)
 
