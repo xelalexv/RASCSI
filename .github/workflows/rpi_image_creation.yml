@@ -29,10 +29,9 @@ jobs:
       - name: Checkout Pi-Gen
         uses: actions/checkout@v2
         with:
-          repository: RPi-Distro/pi-gen
-          path: pi-gen        
-#           repository: akuker/rascsi-pi-gen
-#           path: pi-gen
+          repository: akuker/rascsi-pi-gen
+#          repository: RPi-Distro/pi-gen
+          path: pi-gen
       
       - name: Install Raspberry Pi build toolchain
         run: sudo apt-get update
@@ -58,7 +57,7 @@ jobs:
         run: sudo systemctl stop udisks2.service
 
       - name: Run the Raspberry Pi build generation tool
-        run: sudo ./build.sh
+        run: sudo ./build-docker.sh
         working-directory: pi-gen     
 
       - name: List the files in the deploy directory
