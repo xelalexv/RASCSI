@@ -17,34 +17,60 @@
 //---------------------------------------------------------------------------
 
 #include "scsi_host_bridge.h"
-#include "xm6.h"
+
+#include "../rascsi.h"
 #include "ctapdriver.h"
 #include "cfilesystem.h"
+#include <sstream>
 
-//===========================================================================
-//
-//	SCSI Host Bridge
-//
-//===========================================================================
+using namespace std;
 
-//---------------------------------------------------------------------------
-//
-//	Constructor
-//
-//---------------------------------------------------------------------------
-SCSIBR::SCSIBR() : Disk()
+SCSIBR::SCSIBR() : Disk("SCBR")
 {
+	tap = NULL;
+	m_bTapEnable = false;
+
 	fsoptlen = 0;
 	fsoutlen = 0;
 	fsresult = 0;
 	packet_len = 0;
 
-	// Host Bridge
-	disk.id = MAKEID('S', 'C', 'B', 'R');
+	// Create host file system
+	fs = new CFileSys();
+	fs->Reset();
 
-	#if defined(RASCSI) && defined(__linux__) && !defined(BAREMETAL)
+	AddCommand(SCSIDEV::eCmdTestUnitReady, "TestUnitReady", &SCSIBR::TestUnitReady);
+	AddCommand(SCSIDEV::eCmdRead6, "GetMessage10", &SCSIBR::GetMessage10);
+	AddCommand(SCSIDEV::eCmdWrite6, "SendMessage10", &SCSIBR::SendMessage10);
+}
+
+SCSIBR::~SCSIBR()
+{
+	// TAP driver release
+	if (tap) {
+		tap->Cleanup();
+		delete tap;
+	}
+
+	// Release host file system
+	if (fs) {
+		fs->Reset();
+		delete fs;
+	}
+
+	for (auto const& command : commands) {
+		delete command.second;
+	}
+}
+
+bool SCSIBR::Init(const map<string, string>& params)
+{
+	// Use default parameters if no parameters were provided
+	SetParams(params.empty() ? GetDefaultParams() : params);
+
+#ifdef __linux__
 	// TAP Driver Generation
-	tap = new CTapDriver();
+	tap = new CTapDriver(GetParam("interfaces"));
 	m_bTapEnable = tap->Init();
 
 	// Generate MAC Address
@@ -55,34 +81,42 @@ SCSIBR::SCSIBR() : Disk()
 	}
 
 	// Packet reception flag OFF
-	packet_enable = FALSE;
-	#endif	// RASCSI && !BAREMETAL
+	packet_enable = false;
+#endif
 
-	// Create host file system
-	fs = new CFileSys();
-	fs->Reset();
+	SetReady(m_bTapEnable);
+
+	// Not terminating on regular Linux PCs is helpful for testing
+#if defined(__x86_64__) || defined(__X86__)
+	return true;
+#else
+	return m_bTapEnable;
+#endif
 }
 
-//---------------------------------------------------------------------------
-//
-//	Destructor
-//
-//---------------------------------------------------------------------------
-SCSIBR::~SCSIBR()
+void SCSIBR::AddCommand(SCSIDEV::scsi_command opcode, const char* name, void (SCSIBR::*execute)(SASIDEV *))
 {
-	#if defined(RASCSI) && !defined(BAREMETAL)
-	// TAP driver release
-	if (tap) {
-		tap->Cleanup();
-		delete tap;
-	}
-	#endif	// RASCSI && !BAREMETAL
+	commands[opcode] = new command_t(name, execute);
+}
 
-	// Release host file system
-	if (fs) {
-		fs->Reset();
-		delete fs;
+bool SCSIBR::Dispatch(SCSIDEV *controller)
+{
+	ctrl = controller->GetCtrl();
+
+	if (commands.count(static_cast<SCSIDEV::scsi_command>(ctrl->cmd[0]))) {
+		command_t *command = commands[static_cast<SCSIDEV::scsi_command>(ctrl->cmd[0])];
+
+		LOGDEBUG("%s Executing %s ($%02X)", __PRETTY_FUNCTION__, command->name, (unsigned int)ctrl->cmd[0]);
+
+		(this->*command->execute)(controller);
+
+		return true;
 	}
+
+	LOGTRACE("%s Calling base class for dispatching $%02X", __PRETTY_FUNCTION__, (unsigned int)ctrl->cmd[0]);
+
+	// The base class handles the less specific commands
+	return Disk::Dispatch(controller);
 }
 
 //---------------------------------------------------------------------------
@@ -90,18 +124,15 @@ SCSIBR::~SCSIBR()
 //	INQUIRY
 //
 //---------------------------------------------------------------------------
-int FASTCALL SCSIBR::Inquiry(
-	const DWORD *cdb, BYTE *buf, DWORD major, DWORD minor)
+int SCSIBR::Inquiry(const DWORD *cdb, BYTE *buf)
 {
-	char rev[32];
-
 	ASSERT(cdb);
 	ASSERT(buf);
 	ASSERT(cdb[0] == 0x12);
 
 	// EVPD check
 	if (cdb[1] & 0x01) {
-		disk.code = DISK_INVALIDCDB;
+		SetStatusCode(STATUS_INVALIDCDB);
 		return FALSE;
 	}
 
@@ -112,39 +143,20 @@ int FASTCALL SCSIBR::Inquiry(
 	// buf[4] ... Inquiry additional data
 	memset(buf, 0, 8);
 	buf[0] = 0x09;
-
-	// SCSI-2 p.104 4.4.3 Incorrect logical unit handling
-	if (((cdb[1] >> 5) & 0x07) != disk.lun) {
-		buf[0] = 0x7f;
-	}
-
 	buf[2] = 0x02;
 	buf[3] = 0x02;
 	buf[4] = 36 - 5 + 8;	// required + 8 byte extension
 
-	// Fill with blanks
-	memset(&buf[8], 0x20, buf[4] - 3);
-
-	// Vendor name
-	memcpy(&buf[8], BENDER_SIGNATURE, strlen(BENDER_SIGNATURE));
-
-	// Product name
-	memcpy(&buf[16], "RASCSI BRIDGE", 13);
-
-	// Revision (XM6 version number)
-	sprintf(rev, "0%01d%01d%01d",
-				(int)major, (int)(minor >> 4), (int)(minor & 0x0f));
-	memcpy(&buf[32], rev, 4);
+	// Padded vendor, product, revision
+	memcpy(&buf[8], GetPaddedName().c_str(), 28);
 
 	// Optional function valid flag
 	buf[36] = '0';
 
-	#if defined(RASCSI) && !defined(BAREMETAL)
 	// TAP Enable
 	if (m_bTapEnable) {
 		buf[37] = '1';
 	}
-	#endif	// RASCSI && !BAREMETAL
 
 	// CFileSys Enable
 	buf[38] = '1';
@@ -158,7 +170,6 @@ int FASTCALL SCSIBR::Inquiry(
 	}
 
 	//  Success
-	disk.code = DISK_NOERROR;
 	return size;
 }
 
@@ -167,39 +178,29 @@ int FASTCALL SCSIBR::Inquiry(
 //	TEST UNIT READY
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL SCSIBR::TestUnitReady(const DWORD* /*cdb*/)
+void SCSIBR::TestUnitReady(SASIDEV *controller)
 {
 	// TEST UNIT READY Success
-	disk.code = DISK_NOERROR;
-	return TRUE;
-}
+
+	controller->Status();}
 
 //---------------------------------------------------------------------------
 //
 //	GET MESSAGE(10)
 //
 //---------------------------------------------------------------------------
-int FASTCALL SCSIBR::GetMessage10(const DWORD *cdb, BYTE *buf)
+int SCSIBR::GetMessage10(const DWORD *cdb, BYTE *buf)
 {
-	#if defined(RASCSI) && !defined(BAREMETAL)
-	int func;
-	int total_len;
-	int i;
-	#endif	// RASCSI && !BAREMETAL
-
 	// Type
 	int type = cdb[2];
 
-	#if defined(RASCSI) && !defined(BAREMETAL)
 	// Function number
-	func = cdb[3];
-	#endif	// RASCSI && !BAREMETAL
+	int func = cdb[3];
 
 	// Phase
 	int phase = cdb[9];
 
 	switch (type) {
-		#if defined(RASCSI) && !defined(BAREMETAL)
 		case 1:		// Ethernet
 			// Do not process if TAP is invalid
 			if (!m_bTapEnable) {
@@ -233,8 +234,8 @@ int FASTCALL SCSIBR::GetMessage10(const DWORD *cdb, BYTE *buf)
 				case 3:		// Simultaneous acquisition of multiple packets (size + buffer simultaneously)
 					// Currently the maximum number of packets is 10
 					// Isn't it too fast if I increase more?
-					total_len = 0;
-					for (i = 0; i < 10; i++) {
+					int total_len = 0;
+					for (int i = 0; i < 10; i++) {
 						ReceivePacket();
 						*buf++ = (BYTE)(packet_len >> 8);
 						*buf++ = (BYTE)packet_len;
@@ -248,7 +249,6 @@ int FASTCALL SCSIBR::GetMessage10(const DWORD *cdb, BYTE *buf)
 					return total_len;
 			}
 			break;
-			#endif	// RASCSI && !BAREMETAL
 
 		case 2:		// Host Drive
 			switch (phase) {
@@ -265,7 +265,7 @@ int FASTCALL SCSIBR::GetMessage10(const DWORD *cdb, BYTE *buf)
 	}
 
 	// Error
-	ASSERT(FALSE);
+	ASSERT(false);
 	return 0;
 }
 
@@ -274,7 +274,7 @@ int FASTCALL SCSIBR::GetMessage10(const DWORD *cdb, BYTE *buf)
 //	SEND MESSAGE(10)
 //
 //---------------------------------------------------------------------------
-BOOL FASTCALL SCSIBR::SendMessage10(const DWORD *cdb, BYTE *buf)
+bool SCSIBR::SendMessage10(const DWORD *cdb, BYTE *buf)
 {
 	ASSERT(cdb);
 	ASSERT(buf);
@@ -296,50 +296,111 @@ BOOL FASTCALL SCSIBR::SendMessage10(const DWORD *cdb, BYTE *buf)
 	len |= cdb[8];
 
 	switch (type) {
-	#if defined(RASCSI) && !defined(BAREMETAL)
 		case 1:		// Ethernet
 			// Do not process if TAP is invalid
 			if (!m_bTapEnable) {
-				return FALSE;
+				return false;
 			}
 
 			switch (func) {
 				case 0:		// MAC address setting
 					SetMacAddr(buf);
-					return TRUE;
+					return true;
 
 				case 1:		// Send packet
 					SendPacket(buf, len);
-					return TRUE;
+					return true;
 			}
 			break;
-			#endif	// RASCSI && !BAREMETAL
 
 		case 2:		// Host drive
 			switch (phase) {
 				case 0:		// issue command
 					WriteFs(func, buf);
-					return TRUE;
+					return true;
 
 				case 1:		// additional data writing
 					WriteFsOpt(buf, len);
-					return TRUE;
+					return true;
 			}
 			break;
 	}
 
 	// Error
-	ASSERT(FALSE);
-	return FALSE;
+	ASSERT(false);
+	return false;
 }
 
-#if defined(RASCSI) && !defined(BAREMETAL)
+//---------------------------------------------------------------------------
+//
+//	GET MESSAGE(10)
+//
+//---------------------------------------------------------------------------
+void SCSIBR::GetMessage10(SASIDEV *controller)
+{
+	// Reallocate buffer (because it is not transfer for each block)
+	if (ctrl->bufsize < 0x1000000) {
+		free(ctrl->buffer);
+		ctrl->bufsize = 0x1000000;
+		ctrl->buffer = (BYTE *)malloc(ctrl->bufsize);
+	}
+
+	ctrl->length = GetMessage10(ctrl->cmd, ctrl->buffer);
+	if (ctrl->length <= 0) {
+		// Failure (Error)
+		controller->Error();
+		return;
+	}
+
+	// Set next block
+	ctrl->blocks = 1;
+	ctrl->next = 1;
+
+	controller->DataIn();
+}
+
+//---------------------------------------------------------------------------
+//
+//	SEND MESSAGE(10)
+//
+//  This Send Message command is used by the X68000 host driver
+//
+//---------------------------------------------------------------------------
+void SCSIBR::SendMessage10(SASIDEV *controller)
+{
+	// Reallocate buffer (because it is not transfer for each block)
+	if (ctrl->bufsize < 0x1000000) {
+		free(ctrl->buffer);
+		ctrl->bufsize = 0x1000000;
+		ctrl->buffer = (BYTE *)malloc(ctrl->bufsize);
+	}
+
+	// Set transfer amount
+	ctrl->length = ctrl->cmd[6];
+	ctrl->length <<= 8;
+	ctrl->length |= ctrl->cmd[7];
+	ctrl->length <<= 8;
+	ctrl->length |= ctrl->cmd[8];
+
+	if (ctrl->length <= 0) {
+		// Failure (Error)
+		controller->Error();
+		return;
+	}
+
+	// Set next block
+	ctrl->blocks = 1;
+	ctrl->next = 1;
+
+	controller->DataOut();
+}
+
 //---------------------------------------------------------------------------
 //
 //	Get MAC Address
 //
 //---------------------------------------------------------------------------
-int FASTCALL SCSIBR::GetMacAddr(BYTE *mac)
+int SCSIBR::GetMacAddr(BYTE *mac)
 {
 	ASSERT(mac);
 
@@ -352,7 +413,7 @@ int FASTCALL SCSIBR::GetMacAddr(BYTE *mac)
 //	Set MAC Address
 //
 //---------------------------------------------------------------------------
-void FASTCALL SCSIBR::SetMacAddr(BYTE *mac)
+void SCSIBR::SetMacAddr(BYTE *mac)
 {
 	ASSERT(mac);
 
@@ -364,7 +425,7 @@ void FASTCALL SCSIBR::SetMacAddr(BYTE *mac)
 //	Receive Packet
 //
 //---------------------------------------------------------------------------
-void FASTCALL SCSIBR::ReceivePacket()
+void SCSIBR::ReceivePacket()
 {
 	static const BYTE bcast_addr[6] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
 
@@ -394,7 +455,7 @@ void FASTCALL SCSIBR::ReceivePacket()
 
 	// Store in receive buffer
 	if (packet_len > 0) {
-		packet_enable = TRUE;
+		packet_enable = true;
 	}
 }
 
@@ -403,7 +464,7 @@ void FASTCALL SCSIBR::ReceivePacket()
 //	Get Packet
 //
 //---------------------------------------------------------------------------
-void FASTCALL SCSIBR::GetPacketBuf(BYTE *buf)
+void SCSIBR::GetPacketBuf(BYTE *buf)
 {
 	ASSERT(tap);
 	ASSERT(buf);
@@ -418,7 +479,7 @@ void FASTCALL SCSIBR::GetPacketBuf(BYTE *buf)
 	memcpy(buf, packet_buf, len);
 
 	// Received
-	packet_enable = FALSE;
+	packet_enable = false;
 }
 
 //---------------------------------------------------------------------------
@@ -426,21 +487,20 @@ void FASTCALL SCSIBR::GetPacketBuf(BYTE *buf)
 //	Send Packet
 //
 //---------------------------------------------------------------------------
-void FASTCALL SCSIBR::SendPacket(BYTE *buf, int len)
+void SCSIBR::SendPacket(BYTE *buf, int len)
 {
 	ASSERT(tap);
 	ASSERT(buf);
 
 	tap->Tx(buf, len);
 }
-#endif	// RASCSI && !BAREMETAL
 
 //---------------------------------------------------------------------------
 //
 //  $40 - Device Boot
 //
 //---------------------------------------------------------------------------
-void FASTCALL SCSIBR::FS_InitDevice(BYTE *buf)
+void SCSIBR::FS_InitDevice(BYTE *buf)
 {
 	ASSERT(fs);
 	ASSERT(buf);
@@ -454,7 +514,7 @@ void FASTCALL SCSIBR::FS_InitDevice(BYTE *buf)
 //  $41 - Directory Check
 //
 //---------------------------------------------------------------------------
-void FASTCALL SCSIBR::FS_CheckDir(BYTE *buf)
+void SCSIBR::FS_CheckDir(BYTE *buf)
 {
 	ASSERT(fs);
 	ASSERT(buf);
@@ -475,7 +535,7 @@ void FASTCALL SCSIBR::FS_CheckDir(BYTE *buf)
 //  $42 - Create Directory
 //
 //---------------------------------------------------------------------------
-void FASTCALL SCSIBR::FS_MakeDir(BYTE *buf)
+void SCSIBR::FS_MakeDir(BYTE *buf)
 {
 	ASSERT(fs);
 	ASSERT(buf);
@@ -496,7 +556,7 @@ void FASTCALL SCSIBR::FS_MakeDir(BYTE *buf)
 //  $43 - Remove Directory
 //
 //---------------------------------------------------------------------------
-void FASTCALL SCSIBR::FS_RemoveDir(BYTE *buf)
+void SCSIBR::FS_RemoveDir(BYTE *buf)
 {
 	ASSERT(fs);
 	ASSERT(buf);
@@ -517,7 +577,7 @@ void FASTCALL SCSIBR::FS_RemoveDir(BYTE *buf)
 //  $44 - Rename
 //
 //---------------------------------------------------------------------------
-void FASTCALL SCSIBR::FS_Rename(BYTE *buf)
+void SCSIBR::FS_Rename(BYTE *buf)
 {
 	ASSERT(fs);
 	ASSERT(buf);
@@ -541,7 +601,7 @@ void FASTCALL SCSIBR::FS_Rename(BYTE *buf)
 //  $45 - Delete File
 //
 //---------------------------------------------------------------------------
-void FASTCALL SCSIBR::FS_Delete(BYTE *buf)
+void SCSIBR::FS_Delete(BYTE *buf)
 {
 	ASSERT(fs);
 	ASSERT(buf);
@@ -562,7 +622,7 @@ void FASTCALL SCSIBR::FS_Delete(BYTE *buf)
 //  $46 - Get / Set file attributes
 //
 //---------------------------------------------------------------------------
-void FASTCALL SCSIBR::FS_Attribute(BYTE *buf)
+void SCSIBR::FS_Attribute(BYTE *buf)
 {
 	ASSERT(fs);
 	ASSERT(buf);
@@ -587,7 +647,7 @@ void FASTCALL SCSIBR::FS_Attribute(BYTE *buf)
 //  $47 - File Search
 //
 //---------------------------------------------------------------------------
-void FASTCALL SCSIBR::FS_Files(BYTE *buf)
+void SCSIBR::FS_Files(BYTE *buf)
 {
 	ASSERT(fs);
 	ASSERT(buf);
@@ -633,7 +693,7 @@ void FASTCALL SCSIBR::FS_Files(BYTE *buf)
 //  $48 - File next search
 //
 //---------------------------------------------------------------------------
-void FASTCALL SCSIBR::FS_NFiles(BYTE *buf)
+void SCSIBR::FS_NFiles(BYTE *buf)
 {
 	ASSERT(fs);
 	ASSERT(buf);
@@ -676,7 +736,7 @@ void FASTCALL SCSIBR::FS_NFiles(BYTE *buf)
 //  $49 - File Creation
 //
 //---------------------------------------------------------------------------
-void FASTCALL SCSIBR::FS_Create(BYTE *buf)
+void SCSIBR::FS_Create(BYTE *buf)
 {
 	ASSERT(fs);
 	ASSERT(buf);
@@ -730,7 +790,7 @@ void FASTCALL SCSIBR::FS_Create(BYTE *buf)
 //  $4A - Open File
 //
 //---------------------------------------------------------------------------
-void FASTCALL SCSIBR::FS_Open(BYTE *buf)
+void SCSIBR::FS_Open(BYTE *buf)
 {
 	ASSERT(fs);
 	ASSERT(buf);
@@ -776,7 +836,7 @@ void FASTCALL SCSIBR::FS_Open(BYTE *buf)
 //  $4B - Close File
 //
 //---------------------------------------------------------------------------
-void FASTCALL SCSIBR::FS_Close(BYTE *buf)
+void SCSIBR::FS_Close(BYTE *buf)
 {
 	ASSERT(fs);
 	ASSERT(buf);
@@ -819,7 +879,7 @@ void FASTCALL SCSIBR::FS_Close(BYTE *buf)
 //  $4C - Read File
 //
 //---------------------------------------------------------------------------
-void FASTCALL SCSIBR::FS_Read(BYTE *buf)
+void SCSIBR::FS_Read(BYTE *buf)
 {
 	ASSERT(fs);
 	ASSERT(buf);
@@ -864,7 +924,7 @@ void FASTCALL SCSIBR::FS_Read(BYTE *buf)
 //  $4D - Write file
 //
 //---------------------------------------------------------------------------
-void FASTCALL SCSIBR::FS_Write(BYTE *buf)
+void SCSIBR::FS_Write(BYTE *buf)
 {
 	ASSERT(fs);
 	ASSERT(buf);
@@ -907,7 +967,7 @@ void FASTCALL SCSIBR::FS_Write(BYTE *buf)
 //  $4E - Seek file
 //
 //---------------------------------------------------------------------------
-void FASTCALL SCSIBR::FS_Seek(BYTE *buf)
+void SCSIBR::FS_Seek(BYTE *buf)
 {
 	ASSERT(fs);
 	ASSERT(buf);
@@ -954,7 +1014,7 @@ void FASTCALL SCSIBR::FS_Seek(BYTE *buf)
 //  $4F - File Timestamp Get / Set
 //
 //---------------------------------------------------------------------------
-void FASTCALL SCSIBR::FS_TimeStamp(BYTE *buf)
+void SCSIBR::FS_TimeStamp(BYTE *buf)
 {
 	ASSERT(fs);
 	ASSERT(buf);
@@ -1001,15 +1061,13 @@ void FASTCALL SCSIBR::FS_TimeStamp(BYTE *buf)
 //  $50 - Get Capacity
 //
 //---------------------------------------------------------------------------
-void FASTCALL SCSIBR::FS_GetCapacity(BYTE *buf)
+void SCSIBR::FS_GetCapacity(BYTE *buf)
 {
 	ASSERT(fs);
 	ASSERT(buf);
 
-	int i = 0;
 	DWORD *dp = (DWORD*)buf;
 	DWORD nUnit = ntohl(*dp);
-	i += sizeof(DWORD);
 
 	Human68k::capacity_t cap;
 	fsresult = fs->GetCapacity(nUnit, &cap);
@@ -1028,7 +1086,7 @@ void FASTCALL SCSIBR::FS_GetCapacity(BYTE *buf)
 //  $51 - Drive status inspection/control
 //
 //---------------------------------------------------------------------------
-void FASTCALL SCSIBR::FS_CtrlDrive(BYTE *buf)
+void SCSIBR::FS_CtrlDrive(BYTE *buf)
 {
 	ASSERT(fs);
 	ASSERT(buf);
@@ -1039,7 +1097,6 @@ void FASTCALL SCSIBR::FS_CtrlDrive(BYTE *buf)
 	i += sizeof(DWORD);
 
 	Human68k::ctrldrive_t *pCtrlDrive = (Human68k::ctrldrive_t*)&buf[i];
-	i += sizeof(Human68k::ctrldrive_t);
 
 	fsresult = fs->CtrlDrive(nUnit, pCtrlDrive);
 
@@ -1052,15 +1109,13 @@ void FASTCALL SCSIBR::FS_CtrlDrive(BYTE *buf)
 //  $52 - Get DPB
 //
 //---------------------------------------------------------------------------
-void FASTCALL SCSIBR::FS_GetDPB(BYTE *buf)
+void SCSIBR::FS_GetDPB(BYTE *buf)
 {
 	ASSERT(fs);
 	ASSERT(buf);
 
-	int i = 0;
 	DWORD *dp = (DWORD*)buf;
 	DWORD nUnit = ntohl(*dp);
-	i += sizeof(DWORD);
 
 	Human68k::dpb_t dpb;
 	fsresult = fs->GetDPB(nUnit, &dpb);
@@ -1081,7 +1136,7 @@ void FASTCALL SCSIBR::FS_GetDPB(BYTE *buf)
 //  $53 - Read Sector
 //
 //---------------------------------------------------------------------------
-void FASTCALL SCSIBR::FS_DiskRead(BYTE *buf)
+void SCSIBR::FS_DiskRead(BYTE *buf)
 {
 	ASSERT(fs);
 	ASSERT(buf);
@@ -1108,15 +1163,13 @@ void FASTCALL SCSIBR::FS_DiskRead(BYTE *buf)
 //  $54 - Write Sector
 //
 //---------------------------------------------------------------------------
-void FASTCALL SCSIBR::FS_DiskWrite(BYTE *buf)
+void SCSIBR::FS_DiskWrite(BYTE *buf)
 {
 	ASSERT(fs);
 	ASSERT(buf);
 
-	int i = 0;
 	DWORD *dp = (DWORD*)buf;
 	DWORD nUnit = ntohl(*dp);
-	i += sizeof(DWORD);
 
 	fsresult = fs->DiskWrite(nUnit);
 }
@@ -1126,7 +1179,7 @@ void FASTCALL SCSIBR::FS_DiskWrite(BYTE *buf)
 //  $55 - IOCTRL
 //
 //---------------------------------------------------------------------------
-void FASTCALL SCSIBR::FS_Ioctrl(BYTE *buf)
+void SCSIBR::FS_Ioctrl(BYTE *buf)
 {
 	ASSERT(fs);
 	ASSERT(buf);
@@ -1173,15 +1226,13 @@ void FASTCALL SCSIBR::FS_Ioctrl(BYTE *buf)
 //  $56 - Flush
 //
 //---------------------------------------------------------------------------
-void FASTCALL SCSIBR::FS_Flush(BYTE *buf)
+void SCSIBR::FS_Flush(BYTE *buf)
 {
 	ASSERT(fs);
 	ASSERT(buf);
 
-	int i = 0;
 	DWORD *dp = (DWORD*)buf;
 	DWORD nUnit = ntohl(*dp);
-	i += sizeof(DWORD);
 
 	fsresult = fs->Flush(nUnit);
 }
@@ -1191,15 +1242,13 @@ void FASTCALL SCSIBR::FS_Flush(BYTE *buf)
 //  $57 - Check Media
 //
 //---------------------------------------------------------------------------
-void FASTCALL SCSIBR::FS_CheckMedia(BYTE *buf)
+void SCSIBR::FS_CheckMedia(BYTE *buf)
 {
 	ASSERT(fs);
 	ASSERT(buf);
 
-	int i = 0;
 	DWORD *dp = (DWORD*)buf;
 	DWORD nUnit = ntohl(*dp);
-	i += sizeof(DWORD);
 
 	fsresult = fs->CheckMedia(nUnit);
 }
@@ -1209,15 +1258,13 @@ void FASTCALL SCSIBR::FS_CheckMedia(BYTE *buf)
 //  $58 - Lock
 //
 //---------------------------------------------------------------------------
-void FASTCALL SCSIBR::FS_Lock(BYTE *buf)
+void SCSIBR::FS_Lock(BYTE *buf)
 {
 	ASSERT(fs);
 	ASSERT(buf);
 
-	int i = 0;
 	DWORD *dp = (DWORD*)buf;
 	DWORD nUnit = ntohl(*dp);
-	i += sizeof(DWORD);
 
 	fsresult = fs->Lock(nUnit);
 }
@@ -1227,7 +1274,7 @@ void FASTCALL SCSIBR::FS_Lock(BYTE *buf)
 //	Read Filesystem (result code)
 //
 //---------------------------------------------------------------------------
-int FASTCALL SCSIBR::ReadFsResult(BYTE *buf)
+int SCSIBR::ReadFsResult(BYTE *buf)
 {
 	ASSERT(buf);
 
@@ -1241,7 +1288,7 @@ int FASTCALL SCSIBR::ReadFsResult(BYTE *buf)
 //	Read Filesystem (return data)
 //
 //---------------------------------------------------------------------------
-int FASTCALL SCSIBR::ReadFsOut(BYTE *buf)
+int SCSIBR::ReadFsOut(BYTE *buf)
 {
 	ASSERT(buf);
 
@@ -1254,7 +1301,7 @@ int FASTCALL SCSIBR::ReadFsOut(BYTE *buf)
 //	Read file system (return option data)
 //
 //---------------------------------------------------------------------------
-int FASTCALL SCSIBR::ReadFsOpt(BYTE *buf)
+int SCSIBR::ReadFsOpt(BYTE *buf)
 {
 	ASSERT(buf);
 
@@ -1267,7 +1314,7 @@ int FASTCALL SCSIBR::ReadFsOpt(BYTE *buf)
 //	Write Filesystem
 //
 //---------------------------------------------------------------------------
-void FASTCALL SCSIBR::WriteFs(int func, BYTE *buf)
+void SCSIBR::WriteFs(int func, BYTE *buf)
 {
 	ASSERT(buf);
 
@@ -1275,7 +1322,6 @@ void FASTCALL SCSIBR::WriteFs(int func, BYTE *buf)
 	fsoutlen = 0;
 	fsoptlen = 0;
 
-	// コマンド分岐
 	func &= 0x1f;
 	switch (func) {
 		case 0x00: return FS_InitDevice(buf);	// $40 - start device
@@ -1311,7 +1357,7 @@ void FASTCALL SCSIBR::WriteFs(int func, BYTE *buf)
 //	File system write (input option data)
 //
 //---------------------------------------------------------------------------
-void FASTCALL SCSIBR::WriteFsOpt(BYTE *buf, int num)
+void SCSIBR::WriteFsOpt(BYTE *buf, int num)
 {
 	memcpy(fsopt, buf, num);
 }

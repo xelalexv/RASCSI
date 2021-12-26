@@ -1,21 +1,22 @@
 //---------------------------------------------------------------------------
 //
-//	SCSI Target Emulator RaSCSI (*^..^*)
-//	for Raspberry Pi
+// SCSI Target Emulator RaSCSI (*^..^*)
+// for Raspberry Pi
 //
-//	Powered by XM6 TypeG Technology.
-//	Copyright (C) 2016-2020 GIMONS
-//  Copyright (C) 2020 akuker
+// Copyright (C) 2021 Uwe Seimet
+//
+// Helper methods used by rascsi and rasctl
 //
 //---------------------------------------------------------------------------
 
-#if !defined(rasutil_h)
-#define rasutil_h
+#pragma once
 
-#include <cstdio>
+#include <list>
 #include <string>
+#include "rascsi_interface.pb.h"
 
-void SerializeProtobufData(FILE *fp, const std::string& data);
-std::string DeserializeProtobufData(int fd);
-
-#endif
+namespace ras_util
+{
+	bool GetAsInt(const std::string&, int&);
+	std::string ListDevices(const std::list<rascsi_interface::PbDevice>&);
+}

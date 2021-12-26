@@ -4,14 +4,14 @@
 //
 //	Copyright (C) 2001-2006 ＰＩ．(ytanaka@ipc-tokai.or.jp)
 //	Copyright (C) 2012-2020 GIMONS
-//	[ ファイルパス(サブセット) ]
+//	[ File path (subset) ]
 //
 //---------------------------------------------------------------------------
 
 #include "os.h"
-#include "xm6.h"
 #include "filepath.h"
 #include "fileio.h"
+#include "rascsi.h"
 
 //===========================================================================
 //
@@ -19,31 +19,16 @@
 //
 //===========================================================================
 
-//---------------------------------------------------------------------------
-//
-//	Constructor
-//
-//---------------------------------------------------------------------------
 Filepath::Filepath()
 {
 	// Clear
 	Clear();
 }
 
-//---------------------------------------------------------------------------
-//
-//	Destructor
-//
-//---------------------------------------------------------------------------
 Filepath::~Filepath()
 {
 }
 
-//---------------------------------------------------------------------------
-//
-//	Assignment operator
-//
-//---------------------------------------------------------------------------
 Filepath& Filepath::operator=(const Filepath& path)
 {
 	// Set path (split internally)
@@ -52,12 +37,7 @@ Filepath& Filepath::operator=(const Filepath& path)
 	return *this;
 }
 
-//---------------------------------------------------------------------------
-//
-//      Clear
-//
-//---------------------------------------------------------------------------
-void FASTCALL Filepath::Clear()
+void Filepath::Clear()
 {
 
 	// Clear the path and each part
@@ -69,122 +49,41 @@ void FASTCALL Filepath::Clear()
 
 //---------------------------------------------------------------------------
 //
-//	ファイル設定(ユーザ) MBCS用
+//	File settings (user) for MBCS
 //
 //---------------------------------------------------------------------------
-void FASTCALL Filepath::SetPath(LPCSTR path)
+void Filepath::SetPath(const char *path)
 {
 	ASSERT(path);
 	ASSERT(strlen(path) < _MAX_PATH);
 
 	// Copy pathname
-	strcpy(m_szPath, (LPTSTR)path);
+	strcpy(m_szPath, (char *)path);
 
 	// Split
 	Split();
 }
 
-#ifdef BAREMETAL
 //---------------------------------------------------------------------------
 //
-//	互換関数(dirname) 結果は直ぐにコピーせよ
+//	Split paths
 //
 //---------------------------------------------------------------------------
-static char dirtmp[2];
-char* dirname(char *path)
+void Filepath::Split()
 {
-	char *p;
-	if( path == NULL || *path == '\0' ) {
-		dirtmp[0] = '.';
-		dirtmp[1] = '\0';
-		return dirtmp;
-	}
-
-	p = path + strlen(path) - 1;
-	while( *p == '/' ) {
-		if( p == path )
-			return path;
-		*p-- = '\0';
-	}
-
-	while( p >= path && *p != '/' ) {
-		p--;
-	}
-
-	if (p < path) {
-		dirtmp[0] = '.';
-		dirtmp[1] = '\0';
-		return dirtmp;
-	}
-
-	if (p == path) {
-		dirtmp[0] = '/';
-		dirtmp[1] = '\0';
-		return dirtmp;
-	}
-
-	*p = 0;
-	return path;
-}
-
-//---------------------------------------------------------------------------
-//
-//	互換関数(basename) 結果は直ぐにコピーせよ
-//
-//---------------------------------------------------------------------------
-static char basetmp[2];
-char* basename(char *path)
-{
-	char *p;
-	if( path == NULL || *path == '\0' ) {
-		basetmp[0] = '/';
-		basetmp[1] = '\0';
-		return basetmp;
-	}
-
-	p = path + strlen(path) - 1;
-	while( *p == '/' ) {
-		if( p == path ) {
-			return path;
-		}
-		*p-- = '\0';
-	}
-
-	while( p >= path && *p != '/' ) {
-		p--;
-	}
-
-	return p + 1;
-}
-#endif	// BAREMETAL
-
-//---------------------------------------------------------------------------
-//
-//	パス分離
-//
-//---------------------------------------------------------------------------
-void FASTCALL Filepath::Split()
-{
-	LPTSTR pDir;
-	LPTSTR pDirName;
-	LPTSTR pBase;
-	LPTSTR pBaseName;
-	LPTSTR pExtName;
-
-
-	// パーツを初期化
+	// Initialize the parts
 	m_szDir[0] = _T('\0');
 	m_szFile[0] = _T('\0');
 	m_szExt[0] = _T('\0');
 
-	// 分離
-	pDir = strdup(m_szPath);
-	pDirName = dirname(pDir);
-	pBase = strdup(m_szPath);
-	pBaseName = basename(pBase);
-	pExtName = strrchr(pBaseName, '.');
+	// Split
+	char *pDir = strdup(m_szPath);
+	char *pDirName = dirname(pDir);
+	char *pBase = strdup(m_szPath);
+	char *pBaseName = basename(pBase);
+	char *pExtName = strrchr(pBaseName, '.');
 
-	// 転送
+	// Transmit
 	if (pDirName) {
 		strcpy(m_szDir, pDirName);
 		strcat(m_szDir, "/");
@@ -198,7 +97,7 @@ void FASTCALL Filepath::Split()
 		strcpy(m_szFile, pBaseName);
 	}
 
-	// 解放
+	// Release
 	free(pDir);
 	free(pBase);
 }
@@ -209,34 +108,24 @@ void FASTCALL Filepath::Split()
 //	The returned pointer is temporary. Copy immediately.
 //
 //---------------------------------------------------------------------------
-LPCTSTR FASTCALL Filepath::GetFileExt() const
+const char *Filepath::GetFileExt() const
 {
 
-	// 固定バッファへ合成
+	// Merge into static buffer
 	strcpy(FileExt, m_szExt);
 
-	// LPCTSTRとして返す
-	return (LPCTSTR)FileExt;
+	// Return as LPCTSTR
+	return (const char *)FileExt;
 }
 
-//---------------------------------------------------------------------------
-//
-//	Save
-//
-//---------------------------------------------------------------------------
-BOOL FASTCALL Filepath::Save(Fileio *fio, int /*ver*/)
+BOOL Filepath::Save(Fileio *fio, int /*ver*/)
 {
 	ASSERT(fio);
 
 	return TRUE;
 }
 
-//---------------------------------------------------------------------------
-//
-//	Load
-//
-//---------------------------------------------------------------------------
-BOOL FASTCALL Filepath::Load(Fileio *fio, int /*ver*/)
+BOOL Filepath::Load(Fileio *fio, int /*ver*/)
 {
 	ASSERT(fio);
 

@@ -1,65 +1,76 @@
 //---------------------------------------------------------------------------
 //
-//	SCSI Target Emulator RaSCSI (*^..^*)
-//	for Raspberry Pi
+// SCSI Target Emulator RaSCSI (*^..^*)
+// for Raspberry Pi
 //
-//	Powered by XM6 TypeG Technology.
-//	Copyright (C) 2016-2020 GIMONS
-//  Copyright (C) 2020 akuker
+// Copyright (C) 2021 Uwe Seimet
 //
 //---------------------------------------------------------------------------
 
-#include <cstring>
-#include <cstdlib>
-#include <unistd.h>
-#include "exceptions.h"
+#include <list>
+#include <sstream>
+#include "rascsi_interface.pb.h"
 #include "rasutil.h"
 
 using namespace std;
+using namespace rascsi_interface;
 
-//---------------------------------------------------------------------------
-//
-//	Serialize/Deserialize protobuf data: Length followed by the actual data
-//
-//---------------------------------------------------------------------------
-
-void SerializeProtobufData(FILE *fp, const string& data)
+bool ras_util::GetAsInt(const string& value, int& result)
 {
-	// Write the size of the protobuf data as a header
-    size_t size = data.length();
-    fwrite(&size, sizeof(size), 1, fp);
+	if (value.find_first_not_of("0123456789") != string::npos) {
+		return false;
+	}
 
-    // Write the actual protobuf data
-    void *buf = malloc(size);
-    memcpy(buf, data.data(), size);
-    fwrite(buf, size, 1, fp);
-    fflush(fp);
+	try {
+		result = std::stoul(value);
+	}
+	catch(const invalid_argument& e) {
+		return false;
+	}
+	catch(const out_of_range& e) {
+		return false;
+	}
 
-    free(buf);
+	return true;
 }
 
-string DeserializeProtobufData(int fd)
+string ras_util::ListDevices(const list<PbDevice>& pb_devices)
 {
-	// First read the header with the size of the protobuf data
-	size_t size;
-	size_t res = read(fd, &size, sizeof(int));
-	if (res != sizeof(int)) {
-		// No more data
-		return "";
+	if (pb_devices.empty()) {
+		return "No images currently attached.";
 	}
 
-	// Read the actual protobuf data
-	void *buf = malloc(size);
-	res = read(fd, buf, size);
-	if (res != size) {
-		free(buf);
+	ostringstream s;
+	s << "+----+-----+------+-------------------------------------" << endl
+			<< "| ID | LUN | TYPE | IMAGE FILE" << endl
+			<< "+----+-----+------+-------------------------------------" << endl;
 
-		throw ioexception("Missing protobuf data");
+	list<PbDevice> devices = pb_devices;
+	devices.sort([](const auto& a, const auto& b) { return a.id() < b.id() && a.unit() < b.unit(); });
+
+	for (const auto& device : devices) {
+		string filename;
+		switch (device.type()) {
+			case SCBR:
+				filename = "X68000 HOST BRIDGE";
+				break;
+
+			case SCDP:
+				filename = "DaynaPort SCSI/Link";
+				break;
+
+			default:
+				filename = device.file().name();
+				break;
+		}
+
+		s << "|  " << device.id() << " |   " << device.unit() << " | " << PbDeviceType_Name(device.type()) << " | "
+				<< (filename.empty() ? "NO MEDIA" : filename)
+				<< (!device.status().removed() && (device.properties().read_only() || device.status().protected_()) ? " (READ-ONLY)" : "")
+				<< endl;
 	}
 
-	// Read protobuf data into a string, to be converted into a protobuf data structure by the caller
-	string data((const char *)buf, size);
-	free(buf);
+	s << "+----+-----+------+-------------------------------------";
 
-	return data;
+	return s.str();
 }

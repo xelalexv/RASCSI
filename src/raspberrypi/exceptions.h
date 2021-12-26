@@ -1,45 +1,49 @@
 //---------------------------------------------------------------------------
 //
-//      SCSI Target Emulator RaSCSI (*^..^*)
-//      for Raspberry Pi
+// SCSI Target Emulator RaSCSI (*^..^*)
+// for Raspberry Pi
 //
-//      Powered by XM6 TypeG Technology.
-//      Copyright (C) 2016-2020 GIMONS
-//      [ Exceptions ]
+// Copyright (C) 2021 Uwe Seimet
+//
+// Various exceptions
 //
 //---------------------------------------------------------------------------
 
-#if !defined(exceptions_h)
-#define exceptions_h
+#pragma once
 
 #include <exception>
+#include <string>
 
-class lunexception : public std::exception {
+using namespace std;
+
+class illegal_argument_exception final : public exception {
 private:
-        int lun;
+	string msg;
 
 public:
-        lunexception(int _lun) : lun(_lun) { }
+	illegal_argument_exception(const string& _msg) : msg(_msg) {}
+	illegal_argument_exception() {};
 
-        ~lunexception() { }
-
-        int getlun() const {
-            return lun;
-        }
-};
-
-class ioexception : public std::exception {
-private:
-	const char *msg;
-
-public:
-	ioexception(const char *_msg) : msg(_msg) { }
-
-	~ioexception() { }
-
-	const char *getmsg() const {
+	const string& getmsg() const {
 		return msg;
 	}
 };
 
-#endif
+class io_exception : public exception {
+private:
+	string msg;
+
+public:
+	io_exception(const string& _msg) : msg(_msg) {}
+	virtual ~io_exception() {}
+
+	const string& getmsg() const {
+		return msg;
+	}
+};
+
+class file_not_found_exception : public io_exception {
+public:
+	file_not_found_exception(const string& msg) : io_exception(msg) {}
+	~file_not_found_exception() {}
+};

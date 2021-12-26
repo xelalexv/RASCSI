@@ -6,6 +6,10 @@ core
 *.swp
 __pycache__
 src/web/current
+src/web/rascsi_interface_pb2.py
 src/oled_monitor/current
-rasctl_interface.pb.*
-
+src/oled_monitor/rascsi_interface_pb2.py
+src/raspberrypi/hfdisk/
+*~
+messages.pot
+messages.mo
