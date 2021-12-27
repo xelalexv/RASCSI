@@ -103,7 +103,7 @@ public:
 	int ReadToc(const DWORD *cdb, BYTE *buf);			// READ TOC command
 
 	// Vendor-specific functions
-	int FASTCALL AddVendor(int page, BOOL change, BYTE *buf);		// Add vendor special page
+	int AddVendor(int page, BOOL change, BYTE *buf);		// Add vendor special page
 
 private:
 	// Open

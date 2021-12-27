@@ -509,11 +509,11 @@ int SCSICD::Inquiry(const DWORD *cdb, BYTE *buf)
 		return FALSE;
 	}
 
-	scsi_cmd_inquiry_t *cmd = (scsi_cmd_inquiry_t*)cdb;
+	// scsi_cmd_inquiry_t *cmd = (scsi_cmd_inquiry_t*)cdb;
 
-	// Clear out any garbage in the buffer
-	memset(buf, 0, 8);
-	scsi_resp_inquiry_t *response = (scsi_resp_inquiry_t*)buf;
+	// // Clear out any garbage in the buffer
+	// memset(buf, 0, 8);
+	// scsi_resp_inquiry_t *response = (scsi_resp_inquiry_t*)buf;
 
 	// Basic data
 	// buf[0] ... CD-ROM Device
@@ -528,8 +528,8 @@ int SCSICD::Inquiry(const DWORD *cdb, BYTE *buf)
 	buf[3] = 0x02;
 	buf[4] = 36 - 5;	// Required
 
-	// // Fill with blanks
-	// memset(&buf[8], 0x20, buf[4] - 3);
+	// Fill with blanks
+	memset(&buf[8], 0x20, buf[4] - 3);
 
 	// Padded vendor, product, revision
 	memcpy(&buf[8], GetPaddedName().c_str(), 28);
@@ -560,10 +560,15 @@ int SCSICD::Inquiry(const DWORD *cdb, BYTE *buf)
 	// Size of data that can be returned
 	int size = (buf[4] + 5);
 
+	// // Limit if the other buffer is small
+	// if ((cmd->allocation_length > 0) && (size > cmd->allocation_length)){
+	// 	LOGINFO("Reducing size of buffer from %d to %d", (int)size, (int)cmd->allocation_length);
+	// 	size = cmd->allocation_length;
+	// }
+
 	// Limit if the other buffer is small
-	if ((cmd->allocation_length > 0) && (size > cmd->allocation_length)){
-		LOGINFO("Reducing size of buffer from %d to %d", (int)size, (int)cmd->allocation_length);
-		size = cmd->allocation_length;
+	if (size > (int)cdb[4]) {
+		size = (int)cdb[4];
 	}
 
 	return size;
@@ -576,7 +581,7 @@ int SCSICD::Inquiry(const DWORD *cdb, BYTE *buf)
 //	Add Vendor special page
 //
 //---------------------------------------------------------------------------
-int FASTCALL SCSICD::AddVendor(int page, BOOL change, BYTE *buf)
+int SCSICD::AddVendor(int page, BOOL change, BYTE *buf)
 {
 	ASSERT(buf);
 
