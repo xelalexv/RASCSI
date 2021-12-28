@@ -157,6 +157,7 @@ protected:
 	int AddCachePage(bool change, BYTE *buf);
 	int AddCDROMPage(bool change, BYTE *buf);
 	int AddCDDAPage(bool, BYTE *buf);
+	int AddApplePage(bool change, BYTE *buf);
 
 	virtual int RequestSense(const DWORD *cdb, BYTE *buf);
 

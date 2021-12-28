@@ -778,6 +778,13 @@ int Disk::ModeSense6(const DWORD *cdb, BYTE *buf)
 		}
 	}
 
+	// Page code 48 or 63
+	if (page == 0x30 || page == 0x3f) {
+		//	Special page to make drive Apple compatible
+		size += AddApplePage(change, &buf[size]);
+		valid = true;
+	}
+
 	// Page (vendor special)
 	int ret = AddVendorPage(page, change, &buf[size]);
 	if (ret > 0) {
@@ -1090,10 +1097,22 @@ int Disk::AddCDDAPage(bool change, BYTE *buf)
 	return 16;
 }
 
+int Disk::AddApplePage(bool change, BYTE *buf)
+{
+	// Set the message length
+	buf[0] = 0x30;
+	buf[1] = 0x1c;
+
+	// No changeable area
+	if (!change) {
+		memcpy(&buf[0xa], "APPLE COMPUTER, INC.", 20);
+	}
+
+	return 30;
+}
+
 int Disk::AddVendorPage(int /*page*/, bool /*change*/, BYTE *buf)
 {
-	ASSERT(buf);
-
 	return 0;
 }
 
