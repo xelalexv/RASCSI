@@ -423,12 +423,12 @@
     "device_type": "SCCD",
     "vendor": "MATSHITA",
     "product": "CD-ROM CR-8005 ",
-    "revision": "1.5",
-    "block_size": 512,
+    "revision": "1.0k",
+    "block_size": 2048,
     "size": null,
     "name": "Apple CD 600e",
     "file_type": null,
-    "description": "Emulates standard Apple drive for usage with Macintosh computers.",
+    "description": "Emulates Apple CD ROM drive for use with Macintosh computers.",
     "url": ""
 }
 ]
