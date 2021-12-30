@@ -103,7 +103,7 @@ bool Disk::Dispatch(SCSIDEV *controller)
 	if (commands.count(static_cast<SCSIDEV::scsi_command>(ctrl->cmd[0]))) {
 		command_t *command = commands[static_cast<SCSIDEV::scsi_command>(ctrl->cmd[0])];
 
-		LOGDEBUG("%s Executing %s ($%02X)", __PRETTY_FUNCTION__, command->name, (unsigned int)ctrl->cmd[0]);
+		LOGTRACE("%s Executing %s ($%02X)", __PRETTY_FUNCTION__, command->name, (unsigned int)ctrl->cmd[0]);
 
 		(this->*command->execute)(controller);
 
@@ -433,7 +433,7 @@ void Disk::Inquiry(SASIDEV *controller)
 
 void Disk::ModeSelect6(SASIDEV *controller)
 {
-	LOGTRACE("%s Unsupported mode page $%02X", __PRETTY_FUNCTION__, ctrl->buffer[0]);
+	LOGWARN("%s Unsupported mode page $%02X", __PRETTY_FUNCTION__, ctrl->buffer[0]);
 
 	ctrl->length = ModeSelectCheck6(ctrl->cmd);
 	if (ctrl->length <= 0) {
@@ -446,7 +446,7 @@ void Disk::ModeSelect6(SASIDEV *controller)
 
 void Disk::ModeSelect10(SASIDEV *controller)
 {
-	LOGTRACE("%s Unsupported mode page $%02X", __PRETTY_FUNCTION__, ctrl->buffer[0]);
+	LOGWARN("%s Unsupported mode page $%02X", __PRETTY_FUNCTION__, ctrl->buffer[0]);
 
 	ctrl->length = ModeSelectCheck10(ctrl->cmd);
 	if (ctrl->length <= 0) {
@@ -461,7 +461,7 @@ void Disk::ModeSense6(SASIDEV *controller)
 {
 	ctrl->length = ModeSense6(ctrl->cmd, ctrl->buffer);
 	if (ctrl->length <= 0) {
-		LOGTRACE("%s Unsupported mode page $%02X",__PRETTY_FUNCTION__, (unsigned int)ctrl->cmd[2]);
+		LOGWARN("%s Unsupported mode page $%02X",__PRETTY_FUNCTION__, (unsigned int)ctrl->cmd[2]);
 
 		controller->Error();
 		return;
@@ -474,7 +474,7 @@ void Disk::ModeSense10(SASIDEV *controller)
 {
 	ctrl->length = ModeSense10(ctrl->cmd, ctrl->buffer);
 	if (ctrl->length <= 0) {
-		LOGTRACE("%s Unsupported mode page $%02X", __PRETTY_FUNCTION__, (unsigned int)ctrl->cmd[2]);
+		LOGWARN("%s Unsupported mode page $%02X", __PRETTY_FUNCTION__, (unsigned int)ctrl->cmd[2]);
 
 		controller->Error();
 		return;
@@ -713,6 +713,9 @@ int Disk::ModeSense6(const DWORD *cdb, BYTE *buf)
 		if (IsReady()) {
 			// Short LBA mode parameter block descriptor (number of blocks and block length)
 
+			// TODO: This doesn't match the Block Descriptor format in
+			// Table 2-7B of http://www.epicycle.org.uk/pioneercd/SCSI-2%20Command%20Set.pdf
+			// Its using the Density Code field for the MSB of block count
 			uint64_t disk_blocks = GetBlockCount();
 			buf[4] = disk_blocks >> 24;
 			buf[5] = disk_blocks >> 16;
@@ -975,10 +978,14 @@ int Disk::AddErrorPage(bool change, BYTE *buf)
 {
 	// Set the message length
 	buf[0] = 0x01;
-	buf[1] = 0x0a;
+	buf[1] = 0x06;
 
-	// Retry count is 0, limit time uses internal default value
-	return 12;
+	// Apple's Page 1 error response includes 0x13 as the retry count.
+	// TODO: Need to investigate why and compare to other drives
+	// Observed on the Apple CD 600e.
+	buf[3] = 0x13; 
+
+	return 8;
 }
 
 int Disk::AddFormatPage(bool change, BYTE *buf)
@@ -1099,13 +1106,15 @@ int Disk::AddCDDAPage(bool change, BYTE *buf)
 
 int Disk::AddApplePage(bool change, BYTE *buf)
 {
+	static const char apple_computer[] = "APPLE COMPUTER, INC.   ";
+
 	// Set the message length
 	buf[0] = 0x30;
-	buf[1] = 0x1c;
+	buf[1] = 0x16;
 
 	// No changeable area
 	if (!change) {
-		memcpy(&buf[0xa], "APPLE COMPUTER, INC.", 20);
+		memcpy(&buf[3], apple_computer, sizeof(apple_computer)-1);
 	}
 
 	return 30;

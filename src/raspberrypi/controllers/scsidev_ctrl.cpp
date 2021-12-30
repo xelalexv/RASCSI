@@ -225,7 +225,7 @@ void SCSIDEV::Execute()
 		ctrl.status = 0;
 	}
 
-	LOGDEBUG("++++ CMD ++++ %s Executing command $%02X", __PRETTY_FUNCTION__, (unsigned int)ctrl.cmd[0]);
+	LOGTRACE("++++ CMD ++++ %s Executing command $%02X", __PRETTY_FUNCTION__, (unsigned int)ctrl.cmd[0]);
 
 	int lun = GetEffectiveLun();
 	if (!ctrl.unit[lun]) {
