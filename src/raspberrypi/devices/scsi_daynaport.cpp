@@ -308,7 +308,12 @@ int SCSIDaynaPort::Read(const DWORD *cdb, BYTE *buf, uint64_t block)
 
 			// Return the packet size + 2 for the length + 4 for the flag field
 			// The CRC was already appended by the ctapdriver
-			return rx_packet_size + DAYNAPORT_READ_HEADER_SZ;
+			int size = rx_packet_size + DAYNAPORT_READ_HEADER_SZ;
+			if (size < 64) {
+				// A frame must have at least 64 bytes (see https://github.com/akuker/RASCSI/issues/619)
+				size = 64;
+			}
+			return size;
 		}
 		// If we got to this point, there are still messages in the queue, so 
 		// we should loop back and get the next one.
