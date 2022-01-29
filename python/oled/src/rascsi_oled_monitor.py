@@ -35,8 +35,8 @@ import argparse
 import sys
 from time import sleep
 from collections import deque
-from board import I2C
-from adafruit_ssd1306 import SSD1306_I2C
+from luma.core.interface.serial import i2c
+from luma.oled.device import sh1106
 from PIL import Image, ImageDraw, ImageFont
 from interrupt_handler import GracefulInterruptHandler
 from pi_cmds import get_ip_and_host
@@ -101,7 +101,7 @@ sock_cmd = SocketCmds(host=args.rascsi_host, port=args.rascsi_port)
 ractl_cmd = RaCtlCmds(sock_cmd=sock_cmd, token=TOKEN)
 
 WIDTH = 128
-BORDER = 5
+BORDER = 3
 
 # How long to delay between each update
 DELAY_TIME_MS = 1000
@@ -110,11 +110,11 @@ DELAY_TIME_MS = 1000
 OLED_RESET = None
 
 # init i2c
-I2C = I2C()
+I2C = i2c(port=1, address=0x3C)
 
 # 128x32 display with hardware I2C:
-OLED = SSD1306_I2C(WIDTH, HEIGHT, I2C, addr=0x3C, reset=OLED_RESET)
-OLED.rotation = ROTATION
+OLED = sh1106(I2C, WIDTH, HEIGHT, ROTATION)
+OLED.show()
 
 print("Running with the following display:")
 print(OLED)
@@ -125,8 +125,7 @@ print("Will update the OLED display every " + str(DELAY_TIME_MS) + "ms (approxim
 # Convert the image to mode '1' for 1-bit color (monochrome)
 # Make sure the splash bitmap image is in the same dir as this script
 IMAGE = Image.open(f"resources/splash_start_{HEIGHT}.bmp").convert("1")
-OLED.image(IMAGE)
-OLED.show()
+OLED.display(IMAGE)
 
 # Keep the pretty splash on screen for a number of seconds
 sleep(4)
@@ -207,17 +206,22 @@ def formatted_output():
 
 
 with GracefulInterruptHandler() as handler:
+
+    # Previous snapshot of attached devices, will be compared against
+    # each cycle to identify changes in RaSCSI backend
+    prev_snapshot = ""
+    scroll = False
+
     while True:
 
-        # The reference snapshot of attached devices that will be compared against each cycle
-        # to identify changes in RaSCSI backend
-        ref_snapshot = formatted_output()
-        # The snapshot updated each cycle that will compared with ref_snapshot
-        snapshot = ref_snapshot
-        # The active output that will be displayed on the screen
-        active_output = deque(snapshot)
+        # Snapshot updated each cycle, will be compared with prev_snapshot
+        snapshot = formatted_output()
 
-        while snapshot == ref_snapshot:
+        if snapshot != prev_snapshot:
+            # Changes present, get active output for displaying on screen
+            active_output = deque(snapshot)
+
+        if snapshot != prev_snapshot or scroll:
             # Draw a black filled box to clear the image.
             DRAW.rectangle((0, 0, WIDTH, HEIGHT), outline=0, fill=0)
             Y_POS = TOP
@@ -226,19 +230,16 @@ with GracefulInterruptHandler() as handler:
                 Y_POS += LINE_SPACING
 
             # Shift the index of the array by one to get a scrolling effect
-            if len(active_output) > LINES:
+            scroll = len(active_output) > LINES
+            if scroll:
                 active_output.rotate(-1)
 
-            # Display image.
-            OLED.image(IMAGE)
-            OLED.show()
-            sleep(1000/DELAY_TIME_MS)
+            OLED.display(IMAGE)
+            prev_snapshot = snapshot
 
-            snapshot = formatted_output()
+        sleep(1000/DELAY_TIME_MS)
 
-            if handler.interrupted:
-                # Catch interrupt signals and blank out the screen
-                DRAW.rectangle((0, 0, WIDTH, HEIGHT), outline=0, fill=0)
-                OLED.image(IMAGE)
-                OLED.show()
-                sys.exit("Shutting down the OLED display...")
+        if handler.interrupted:
+            # Catch interrupt signals and blank out the screen
+            OLED.cleanup()
+            sys.exit("Shutting down the OLED display...")
