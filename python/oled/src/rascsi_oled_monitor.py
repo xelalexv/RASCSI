@@ -36,7 +36,7 @@ import sys
 from time import sleep
 from collections import deque
 from luma.core.interface.serial import i2c
-from luma.oled.device import sh1106
+from luma.oled.device import sh1106, ssd1306
 from PIL import Image, ImageDraw, ImageFont
 from interrupt_handler import GracefulInterruptHandler
 from pi_cmds import get_ip_and_host
@@ -44,6 +44,14 @@ from rascsi.ractl_cmds import RaCtlCmds
 from rascsi.socket_cmds import SocketCmds
 
 parser = argparse.ArgumentParser(description="RaSCSI OLED Monitor script")
+parser.add_argument(
+    "--chipset",
+    type=str,
+    choices=["sh1106", "ssd1306"],
+    default="ssd1306",
+    action="store",
+    help="The chip set of the OLED display",
+    )
 parser.add_argument(
     "--rotation",
     type=int,
@@ -113,7 +121,13 @@ OLED_RESET = None
 I2C = i2c(port=1, address=0x3C)
 
 # 128x32 display with hardware I2C:
-OLED = sh1106(I2C, WIDTH, HEIGHT, ROTATION)
+if args.chipset == "sh1106":
+    OLED = sh1106(I2C, WIDTH, HEIGHT, ROTATION)
+elif "ssd1306":
+    OLED = ssd1306(I2C, WIDTH, HEIGHT, ROTATION)
+else:
+    sys.exit("unsupported chip set")
+
 OLED.show()
 
 print("Running with the following display:")

@@ -121,6 +121,9 @@ while [ "$1" != "" ]; do
     PARAM=$(echo "$1" | awk -F= '{print $1}')
     VALUE=$(echo "$1" | awk -F= '{print $2}')
     case $PARAM in
+	-c | --chipset)
+	    CHIPSET="--chipset $VALUE"
+	    ;;
 	-r | --rotation)
 	    ROTATION="--rotation $VALUE"
 	    ;;
@@ -139,6 +142,11 @@ while [ "$1" != "" ]; do
 done
 
 echo "Starting OLED Screen..."
+if [ -z ${CHIPSET+x} ]; then
+    echo "No chip set parameter given; falling back to the default."
+else
+    echo "Starting with parameter $CHIPSET"
+fi
 if [ -z ${ROTATION+x} ]; then
     echo "No screen rotation parameter given; falling back to the default."
 else
@@ -152,4 +160,4 @@ fi
 
 PYTHON_COMMON_PATH=$(dirname $PWD)/common/src
 export PYTHONPATH=$PWD/src:${PYTHON_COMMON_PATH}
-python3 src/rascsi_oled_monitor.py ${ROTATION} ${HEIGHT} ${PASSWORD}
+python3 src/rascsi_oled_monitor.py ${CHIPSET} ${ROTATION} ${HEIGHT} ${PASSWORD}
