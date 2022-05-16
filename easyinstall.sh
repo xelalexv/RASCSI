@@ -874,6 +874,20 @@ function installRaScsiScreen() {
     echo "IMPORTANT: This configuration requires a OLED screen to be installed onto your RaSCSI board."
     echo "See wiki for more information: https://github.com/akuker/RASCSI/wiki/OLED-Status-Display-(Optional)"
     echo ""
+    echo "Choose OLED chip set:"
+    echo "  1) SSD1306 (default)"
+    echo "  2) SH1106"
+    read REPLY
+
+    if [ "$REPLY" == "2" ]; then
+        echo "Proceeding with chip set SH1106."
+        CHIPSET="sh1106"
+    else
+        echo "Proceeding with chip set SSD1306."
+        CHIPSET="ssd1306"
+    fi
+
+    echo ""
     echo "Choose screen rotation:"
     echo "  1) 0 degrees"
     echo "  2) 180 degrees (default)"
@@ -931,11 +945,11 @@ function installRaScsiScreen() {
     sudo cp -f "$OLED_INSTALL_PATH/service-infra/rascsi-oled.service" "$SYSTEMD_PATH/rascsi-oled.service"
     sudo sed -i /^ExecStart=/d "$SYSTEMD_PATH/rascsi-oled.service"
     if [ ! -z "$TOKEN" ]; then
-        sudo sed -i "8 i ExecStart=$OLED_INSTALL_PATH/start.sh --rotation=$ROTATION --height=$SCREEN_HEIGHT --password=$TOKEN" "$SYSTEMD_PATH/rascsi-oled.service"
+        sudo sed -i "8 i ExecStart=$OLED_INSTALL_PATH/start.sh --chipset=$CHIPSET --rotation=$ROTATION --height=$SCREEN_HEIGHT --password=$TOKEN" "$SYSTEMD_PATH/rascsi-oled.service"
         sudo chmod 600 "$SYSTEMD_PATH/rascsi-oled.service"
         echo "Granted access to the OLED Monitor with the password that you configured for RaSCSI."
     else
-        sudo sed -i "8 i ExecStart=$OLED_INSTALL_PATH/start.sh --rotation=$ROTATION --height=$SCREEN_HEIGHT" "$SYSTEMD_PATH/rascsi-oled.service"
+        sudo sed -i "8 i ExecStart=$OLED_INSTALL_PATH/start.sh --chipset=$CHIPSET --rotation=$ROTATION --height=$SCREEN_HEIGHT" "$SYSTEMD_PATH/rascsi-oled.service"
     fi
 
     sudo systemctl daemon-reload

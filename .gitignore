@@ -18,3 +18,5 @@ s.sh
 # temporary kicad files
 *-backups
 
+# editor files
+*.sublime*
